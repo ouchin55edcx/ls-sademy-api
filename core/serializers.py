@@ -46,10 +46,35 @@ class LoginSerializer(serializers.Serializer):
 
 
 class UserSerializer(serializers.ModelSerializer):
-    """User serializer for login response"""
+    """User serializer for login response with role information"""
+    role = serializers.SerializerMethodField()
+    role_id = serializers.SerializerMethodField()
+    
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'phone']
+        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'phone', 'role', 'role_id']
+    
+    def get_role(self, obj):
+        """Get user role based on related models"""
+        if hasattr(obj, 'admin_profile'):
+            return 'admin'
+        elif hasattr(obj, 'collaborator_profile'):
+            return 'collaborator'
+        elif hasattr(obj, 'client_profile'):
+            return 'client'
+        else:
+            return 'user'
+    
+    def get_role_id(self, obj):
+        """Get the ID of the role-specific profile"""
+        if hasattr(obj, 'admin_profile'):
+            return obj.admin_profile.pk
+        elif hasattr(obj, 'collaborator_profile'):
+            return obj.collaborator_profile.pk
+        elif hasattr(obj, 'client_profile'):
+            return obj.client_profile.pk
+        else:
+            return None
 
 
 class ReviewSerializer(serializers.ModelSerializer):

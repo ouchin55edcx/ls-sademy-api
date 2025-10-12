@@ -36,9 +36,18 @@ class LoginAPIView(APIView):
             "email": "client1@example.com",
             "first_name": "Youssef",
             "last_name": "Tazi",
-            "phone": "+212600000004"
-        }
+            "phone": "+212600000004",
+            "role": "client",
+            "role_id": 1
+        },
+        "message": "Login successful"
     }
+    
+    Role types:
+    - admin: Superuser with admin privileges
+    - collaborator: Team member with collaboration access
+    - client: Customer with client access
+    - user: Basic user without specific role
     """
     permission_classes = [AllowAny]
     serializer_class = LoginSerializer
