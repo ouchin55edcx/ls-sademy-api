@@ -11,7 +11,10 @@ from core.views import (
     ServiceAdminListAPIView,
     ServiceCreateAPIView,
     ServiceRetrieveUpdateDestroyAPIView,
-    ServiceToggleActiveAPIView
+    ServiceToggleActiveAPIView,
+    TemplateAdminListAPIView,
+    TemplateCreateAPIView,
+    TemplateRetrieveUpdateDestroyAPIView
 )
 
 app_name = 'core'
@@ -38,4 +41,9 @@ urlpatterns = [
     path('admin/services/create/', ServiceCreateAPIView.as_view(), name='admin-service-create'),
     path('admin/services/<int:pk>/', ServiceRetrieveUpdateDestroyAPIView.as_view(), name='admin-service-detail'),
     path('admin/services/<int:pk>/toggle-active/', ServiceToggleActiveAPIView.as_view(), name='admin-service-toggle-active'),
+    
+    # Admin - Template Management (Admin Only)
+    path('admin/templates/', TemplateAdminListAPIView.as_view(), name='admin-templates-list'),
+    path('admin/templates/create/', TemplateCreateAPIView.as_view(), name='admin-template-create'),
+    path('admin/templates/<int:pk>/', TemplateRetrieveUpdateDestroyAPIView.as_view(), name='admin-template-detail'),
 ]

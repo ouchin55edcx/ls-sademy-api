@@ -81,9 +81,34 @@ class TemplateSerializer(serializers.ModelSerializer):
     """
     Template serializer for displaying service templates
     """
+    service_name = serializers.CharField(source='service.name', read_only=True)
+    
     class Meta:
         model = Template
-        fields = ['id', 'title', 'description', 'file', 'demo']
+        fields = ['id', 'service', 'service_name', 'title', 'description', 'file', 'demo_video']
+
+
+class TemplateCreateUpdateSerializer(serializers.ModelSerializer):
+    """
+    Template serializer for creating and updating templates (admin only)
+    """
+    class Meta:
+        model = Template
+        fields = ['service', 'title', 'description', 'file', 'demo_video']
+    
+    def validate_service(self, value):
+        """Validate that the service exists and is active"""
+        if not value.is_active:
+            raise serializers.ValidationError('Cannot create template for inactive service.')
+        return value
+    
+    def validate_title(self, value):
+        """Check if template title already exists for the same service"""
+        service = self.initial_data.get('service')
+        if service and self.instance is None:  # Creating new template
+            if Template.objects.filter(service=service, title=value).exists():
+                raise serializers.ValidationError('Template with this title already exists for this service.')
+        return value
 
 
 class ReviewSerializer(serializers.ModelSerializer):

@@ -9,12 +9,13 @@ from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.authtoken.models import Token
 from django.contrib.auth import login, get_user_model
-from core.models import Service, Review
+from core.models import Service, Review, Template
 from core.serializers import (
     LoginSerializer, UserSerializer, ServiceListSerializer,
     ServiceDetailSerializer, AllReviewsSerializer,
     UserListSerializer, CreateCollaboratorSerializer, DeactivateUserSerializer,
-    ServiceCreateUpdateSerializer, ServiceAdminListSerializer, ServiceToggleActiveSerializer
+    ServiceCreateUpdateSerializer, ServiceAdminListSerializer, ServiceToggleActiveSerializer,
+    TemplateSerializer, TemplateCreateUpdateSerializer
 )
 from core.permissions import IsAdminUser
 
@@ -648,3 +649,138 @@ class ServiceToggleActiveAPIView(APIView):
             }, status=status.HTTP_200_OK)
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+# Template CRUD Views for Admin
+
+class TemplateAdminListAPIView(generics.ListAPIView):
+    """
+    GET /api/admin/templates/
+    Get all templates (admin only) with filtering
+    
+    Query parameters:
+    - service_id: Filter by service ID
+    - search: Search by title or description
+    
+    Examples:
+    - GET /api/admin/templates/ - Get all templates
+    - GET /api/admin/templates/?service_id=1 - Get templates for service ID 1
+    - GET /api/admin/templates/?search=portfolio - Search templates by title/description
+    
+    Response:
+    [
+        {
+            "id": 1,
+            "service": 1,
+            "service_name": "Web Development",
+            "title": "E-commerce Website Template",
+            "description": "Modern e-commerce template with shopping cart",
+            "file": "/media/templates/files/ecommerce-template.zip",
+            "demo_video": "/media/templates/demos/ecommerce-demo.mp4"
+        }
+    ]
+    """
+    permission_classes = [IsAuthenticated, IsAdminUser]
+    serializer_class = TemplateSerializer
+    
+    def get_queryset(self):
+        from django.db import models
+        queryset = Template.objects.select_related('service').all().order_by('service__name', 'title')
+        
+        # Filter by service_id
+        service_id = self.request.query_params.get('service_id', None)
+        if service_id:
+            queryset = queryset.filter(service__id=service_id)
+        
+        # Search by title or description
+        search = self.request.query_params.get('search', None)
+        if search:
+            queryset = queryset.filter(
+                models.Q(title__icontains=search) | 
+                models.Q(description__icontains=search)
+            )
+        
+        return queryset
+
+
+class TemplateCreateAPIView(generics.CreateAPIView):
+    """
+    POST /api/admin/templates/
+    Create a new template (admin only)
+    
+    Request body (multipart/form-data for file upload):
+    {
+        "service": 1,
+        "title": "Portfolio Website Template",
+        "description": "Clean portfolio template for professionals",
+        "file": <template_file>,
+        "demo_video": <demo_video_file>
+    }
+    
+    Response:
+    {
+        "id": 2,
+        "service": 1,
+        "service_name": "Web Development",
+        "title": "Portfolio Website Template",
+        "description": "Clean portfolio template for professionals",
+        "file": "/media/templates/files/portfolio-template.zip",
+        "demo_video": "/media/templates/demos/portfolio-demo.mp4"
+    }
+    """
+    permission_classes = [IsAuthenticated, IsAdminUser]
+    serializer_class = TemplateCreateUpdateSerializer
+
+
+class TemplateRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    GET /api/admin/templates/{id}/
+    PUT /api/admin/templates/{id}/
+    PATCH /api/admin/templates/{id}/
+    DELETE /api/admin/templates/{id}/
+    
+    Retrieve, update, or delete a template (admin only)
+    
+    GET Response:
+    {
+        "id": 1,
+        "service": 1,
+        "service_name": "Web Development",
+        "title": "E-commerce Website Template",
+        "description": "Modern e-commerce template with shopping cart",
+        "file": "/media/templates/files/ecommerce-template.zip",
+        "demo_video": "/media/templates/demos/ecommerce-demo.mp4"
+    }
+    
+    PUT/PATCH Request body (multipart/form-data for file upload):
+    {
+        "service": 1,
+        "title": "E-commerce Website Template Updated",
+        "description": "Updated description...",
+        "file": <new_template_file>,
+        "demo_video": <new_demo_video_file>
+    }
+    
+    DELETE Response:
+    Success (200):
+    {
+        "message": "Template deleted successfully"
+    }
+    """
+    permission_classes = [IsAuthenticated, IsAdminUser]
+    serializer_class = TemplateCreateUpdateSerializer
+    queryset = Template.objects.select_related('service').all()
+    
+    def get_serializer_class(self):
+        """Return different serializer for GET vs POST/PUT/PATCH"""
+        if self.request.method == 'GET':
+            return TemplateSerializer
+        return TemplateCreateUpdateSerializer
+    
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        self.perform_destroy(instance)
+        return Response(
+            {'message': 'Template deleted successfully'},
+            status=status.HTTP_200_OK
+        )

@@ -131,8 +131,8 @@ class Template(models.Model):
     )
     title = models.CharField(max_length=200)
     description = models.TextField(blank=True)
-    file = models.CharField(max_length=255, blank=True, help_text="File path or URL")
-    demo = models.CharField(max_length=255, blank=True, help_text="Demo URL")
+    file = models.FileField(upload_to='media/templates/files/', blank=True, null=True, help_text="Template file")
+    demo_video = models.FileField(upload_to='media/templates/demos/', blank=True, null=True, help_text="Demo video file")
 
     class Meta:
         db_table = 'templates'
