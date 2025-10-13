@@ -77,7 +77,26 @@ CORS_ALLOW_ALL_ORIGINS = False
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",  # Next.js default dev server
+    "http://127.0.0.1:3000",  # Alternative localhost
+    "http://localhost:8000",  # Django dev server
+    "http://127.0.0.1:8000",  # Alternative localhost for Django
     # "https://your-production-domain.com",
+]
+
+# Allow credentials to be included in CORS requests
+CORS_ALLOW_CREDENTIALS = True
+
+# Allow specific headers
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
 ]
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases

@@ -5,7 +5,7 @@ Place this file in: core/serializers.py
 
 from rest_framework import serializers
 from django.contrib.auth import get_user_model, authenticate
-from core.models import Service, Review, Livrable, Order, Client, Template
+from core.models import Service, Review, Livrable, Order, Client, Template, Collaborator, Admin
 
 User = get_user_model()
 
@@ -250,3 +250,141 @@ class AllReviewsSerializer(serializers.ModelSerializer):
     
     def get_client_name(self, obj):
         return obj.livrable.order.client.user.get_full_name() or obj.livrable.order.client.user.username
+
+
+# Admin User Management Serializers
+
+class UserListSerializer(serializers.ModelSerializer):
+    """
+    Serializer for listing all users (admin only)
+    """
+    role = serializers.SerializerMethodField()
+    full_name = serializers.SerializerMethodField()
+    is_active_collab = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = User
+        fields = [
+            'id', 
+            'username', 
+            'email', 
+            'first_name', 
+            'last_name',
+            'full_name',
+            'phone', 
+            'role',
+            'is_active',
+            'is_active_collab',
+            'date_joined',
+            'last_login'
+        ]
+    
+    def get_role(self, obj):
+        """Get user role"""
+        if hasattr(obj, 'admin_profile'):
+            return 'admin'
+        elif hasattr(obj, 'collaborator_profile'):
+            return 'collaborator'
+        elif hasattr(obj, 'client_profile'):
+            return 'client'
+        else:
+            return 'user'
+    
+    def get_full_name(self, obj):
+        """Get full name or username"""
+        return obj.get_full_name() or obj.username
+    
+    def get_is_active_collab(self, obj):
+        """Get collaborator active status (only for collaborators)"""
+        if hasattr(obj, 'collaborator_profile'):
+            return obj.collaborator_profile.is_active
+        return None
+
+
+class CreateCollaboratorSerializer(serializers.ModelSerializer):
+    """
+    Serializer for creating new collaborators (admin only)
+    """
+    password = serializers.CharField(write_only=True, style={'input_type': 'password'})
+    confirm_password = serializers.CharField(write_only=True, style={'input_type': 'password'})
+    
+    class Meta:
+        model = User
+        fields = [
+            'username',
+            'email',
+            'first_name',
+            'last_name',
+            'phone',
+            'password',
+            'confirm_password'
+        ]
+    
+    def validate(self, data):
+        """Validate password confirmation"""
+        if data['password'] != data['confirm_password']:
+            raise serializers.ValidationError({
+                'confirm_password': 'Passwords do not match.'
+            })
+        return data
+    
+    def validate_username(self, value):
+        """Check if username already exists"""
+        if User.objects.filter(username=value).exists():
+            raise serializers.ValidationError('Username already exists.')
+        return value
+    
+    def validate_email(self, value):
+        """Check if email already exists"""
+        if User.objects.filter(email=value).exists():
+            raise serializers.ValidationError('Email already exists.')
+        return value
+    
+    def validate_phone(self, value):
+        """Check if phone already exists (if provided)"""
+        if value and User.objects.filter(phone=value).exists():
+            raise serializers.ValidationError('Phone number already exists.')
+        return value
+    
+    def create(self, validated_data):
+        """Create user and collaborator profile"""
+        # Remove confirm_password as it's not needed for user creation
+        validated_data.pop('confirm_password')
+        password = validated_data.pop('password')
+        
+        # Create user
+        user = User.objects.create_user(
+            password=password,
+            **validated_data
+        )
+        
+        # Create collaborator profile
+        Collaborator.objects.create(user=user, is_active=True)
+        
+        return user
+
+
+class DeactivateUserSerializer(serializers.Serializer):
+    """
+    Serializer for deactivating/activating a user (admin only)
+    """
+    is_active = serializers.BooleanField()
+    
+    def update(self, instance, validated_data):
+        """Update user active status"""
+        is_active = validated_data.get('is_active')
+        
+        # Prevent deactivating admin users
+        if hasattr(instance, 'admin_profile'):
+            raise serializers.ValidationError('Cannot deactivate admin users.')
+        
+        # Update user.is_active
+        instance.is_active = is_active
+        instance.save()
+        
+        # If it's a collaborator, also update collaborator.is_active
+        if hasattr(instance, 'collaborator_profile'):
+            instance.collaborator_profile.is_active = is_active
+            instance.collaborator_profile.save()
+        
+        return instance
