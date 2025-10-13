@@ -83,6 +83,14 @@ CORS_ALLOWED_ORIGINS = [
     # "https://your-production-domain.com",
 ]
 
+# Trusted origins for CSRF protection
+CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+]
+
 # Allow credentials to be included in CORS requests
 CORS_ALLOW_CREDENTIALS = True
 
@@ -97,6 +105,22 @@ CORS_ALLOW_HEADERS = [
     'user-agent',
     'x-csrftoken',
     'x-requested-with',
+]
+
+# Allow specific methods
+CORS_ALLOW_METHODS = [
+    'DELETE',
+    'GET',
+    'OPTIONS',
+    'PATCH',
+    'POST',
+    'PUT',
+]
+
+# Expose headers to the client
+CORS_EXPOSE_HEADERS = [
+    'content-type',
+    'x-csrftoken',
 ]
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases

@@ -370,6 +370,10 @@ class DeactivateUserSerializer(serializers.Serializer):
     """
     is_active = serializers.BooleanField()
     
+    def create(self, validated_data):
+        """Not used for this serializer"""
+        pass
+    
     def update(self, instance, validated_data):
         """Update user active status"""
         is_active = validated_data.get('is_active')
