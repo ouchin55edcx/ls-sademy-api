@@ -76,7 +76,7 @@ class LoginAPIView(APIView):
 class ActiveServicesListAPIView(generics.ListAPIView):
     """
     GET /api/services/
-    Get all active services with reviews count and average rating
+    Get all active services with templates count, reviews count and average rating
     
     Response:
     [
@@ -85,7 +85,9 @@ class ActiveServicesListAPIView(generics.ListAPIView):
             "name": "Web Development",
             "price": "5000.00",
             "description": "Professional web development services...",
+            "tool_name": "React, Django",
             "is_active": true,
+            "templates_count": 3,
             "reviews_count": 5,
             "average_rating": 4.8
         }
@@ -99,7 +101,8 @@ class ActiveServicesListAPIView(generics.ListAPIView):
 class ServiceDetailAPIView(generics.RetrieveAPIView):
     """
     GET /api/services/{id}/
-    Get service details by ID with related reviews, orders, and deliverables
+    Get service details by ID with related templates and reviews
+    Public endpoint for visitors
     
     Response:
     {
@@ -107,7 +110,24 @@ class ServiceDetailAPIView(generics.RetrieveAPIView):
         "name": "Web Development",
         "price": "5000.00",
         "description": "Professional web development services...",
+        "tool_name": "React, Django, PostgreSQL",
         "is_active": true,
+        "templates": [
+            {
+                "id": 1,
+                "title": "E-commerce Website Template",
+                "description": "Modern e-commerce template with shopping cart",
+                "file": "/templates/ecommerce-template.zip",
+                "demo": "https://demo.example.com/ecommerce"
+            },
+            {
+                "id": 2,
+                "title": "Portfolio Website Template",
+                "description": "Clean portfolio template for professionals",
+                "file": "/templates/portfolio-template.zip",
+                "demo": "https://demo.example.com/portfolio"
+            }
+        ],
         "reviews_count": 5,
         "average_rating": 4.8,
         "recent_reviews": [
@@ -120,17 +140,6 @@ class ServiceDetailAPIView(generics.RetrieveAPIView):
                 "rating": 5,
                 "comment": "Outstanding work!",
                 "date": "2024-10-10T10:00:00Z"
-            }
-        ],
-        "total_orders": 10,
-        "completed_orders": 8,
-        "sample_deliverables": [
-            {
-                "id": 1,
-                "name": "E-commerce Website Final Delivery",
-                "description": "Complete website with all features",
-                "is_accepted": true,
-                "reviews": [...]
             }
         ]
     }

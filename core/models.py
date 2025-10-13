@@ -111,7 +111,7 @@ class Service(models.Model):
     )
     description = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
-    last_name = models.CharField(max_length=100, blank=True)
+    tool_name = models.CharField(max_length=100, blank=True)
 
     class Meta:
         db_table = 'services'
@@ -121,6 +121,31 @@ class Service(models.Model):
 
     def __str__(self):
         return f"{self.name} - ${self.price}"
+
+
+class Template(models.Model):
+    """
+    Template model - Each service can have multiple templates
+    For public display to visitors
+    """
+    service = models.ForeignKey(
+        Service,
+        on_delete=models.CASCADE,
+        related_name='templates'
+    )
+    title = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+    file = models.CharField(max_length=255, blank=True, help_text="File path or URL")
+    demo = models.CharField(max_length=255, blank=True, help_text="Demo URL")
+
+    class Meta:
+        db_table = 'templates'
+        verbose_name = 'Template'
+        verbose_name_plural = 'Templates'
+        ordering = ['title']
+
+    def __str__(self):
+        return f"{self.title} - {self.service.name}"
 
 
 class Status(models.Model):

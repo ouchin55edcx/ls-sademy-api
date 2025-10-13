@@ -7,7 +7,7 @@ Run with: python manage.py seed_data
 from django.core.management.base import BaseCommand
 from django.contrib.auth import get_user_model
 from core.models import (
-    Admin, Collaborator, Client, Service, Status, 
+    Admin, Collaborator, Client, Service, Template, Status, 
     Order, Livrable, Review
 )
 from decimal import Decimal
@@ -29,6 +29,7 @@ class Command(BaseCommand):
         Livrable.objects.all().delete()
         Order.objects.all().delete()
         Status.objects.all().delete()
+        Template.objects.all().delete()
         Service.objects.all().delete()
         Client.objects.all().delete()
         Collaborator.objects.all().delete()
@@ -110,42 +111,42 @@ class Command(BaseCommand):
                 'price': Decimal('5000.00'),
                 'description': 'Professional web development services including responsive design, e-commerce solutions, and custom web applications.',
                 'is_active': True,
-                'last_name': 'Development'
+                'tool_name': 'React, Django, PostgreSQL'
             },
             {
                 'name': 'Mobile App Development',
                 'price': Decimal('8000.00'),
                 'description': 'Native and cross-platform mobile application development for iOS and Android.',
                 'is_active': True,
-                'last_name': 'Development'
+                'tool_name': 'React Native, Flutter, Swift'
             },
             {
                 'name': 'Digital Marketing',
                 'price': Decimal('3000.00'),
                 'description': 'Complete digital marketing services including SEO, social media management, and content marketing.',
                 'is_active': True,
-                'last_name': 'Marketing'
+                'tool_name': 'Google Analytics, SEMrush, Hootsuite'
             },
             {
                 'name': 'Graphic Design',
                 'price': Decimal('2000.00'),
                 'description': 'Professional graphic design services for logos, branding, and marketing materials.',
                 'is_active': True,
-                'last_name': 'Design'
+                'tool_name': 'Adobe Photoshop, Illustrator, Figma'
             },
             {
                 'name': 'Video Production',
                 'price': Decimal('4500.00'),
                 'description': 'High-quality video production services for commercials, corporate videos, and promotional content.',
                 'is_active': True,
-                'last_name': 'Media'
+                'tool_name': 'Adobe Premiere, After Effects, DaVinci Resolve'
             },
             {
                 'name': 'Legacy Service',
                 'price': Decimal('1500.00'),
                 'description': 'This service is no longer active.',
                 'is_active': False,
-                'last_name': 'Deprecated'
+                'tool_name': ''
             },
         ]
         
@@ -155,6 +156,101 @@ class Command(BaseCommand):
             services.append(service)
             status_text = "✓ Active" if data['is_active'] else "✗ Inactive"
             self.stdout.write(f"  {status_text} Created service: {data['name']}")
+
+        # Create Templates
+        self.stdout.write('Creating templates...')
+        template_data = [
+            # Web Development Templates
+            {
+                'service': services[0],  # Web Development
+                'title': 'E-commerce Website Template',
+                'description': 'Modern e-commerce template with shopping cart, payment integration, and product management.',
+                'file': '/templates/web/ecommerce-template.zip',
+                'demo': 'https://demo.sademiy.com/ecommerce'
+            },
+            {
+                'service': services[0],
+                'title': 'Portfolio Website Template',
+                'description': 'Clean and professional portfolio template for showcasing your work.',
+                'file': '/templates/web/portfolio-template.zip',
+                'demo': 'https://demo.sademiy.com/portfolio'
+            },
+            {
+                'service': services[0],
+                'title': 'Corporate Website Template',
+                'description': 'Professional corporate website template with CMS integration.',
+                'file': '/templates/web/corporate-template.zip',
+                'demo': 'https://demo.sademiy.com/corporate'
+            },
+            # Mobile App Templates
+            {
+                'service': services[1],  # Mobile App Development
+                'title': 'Food Delivery App Template',
+                'description': 'Complete food delivery app template with order tracking and payments.',
+                'file': '/templates/mobile/food-delivery-app.zip',
+                'demo': 'https://demo.sademiy.com/food-app'
+            },
+            {
+                'service': services[1],
+                'title': 'Fitness Tracker App Template',
+                'description': 'Health and fitness tracking app with workout plans and progress monitoring.',
+                'file': '/templates/mobile/fitness-app.zip',
+                'demo': 'https://demo.sademiy.com/fitness-app'
+            },
+            # Digital Marketing Templates
+            {
+                'service': services[2],  # Digital Marketing
+                'title': 'Social Media Campaign Template',
+                'description': 'Ready-to-use social media campaign templates for various platforms.',
+                'file': '/templates/marketing/social-campaign.zip',
+                'demo': 'https://demo.sademiy.com/social-campaign'
+            },
+            {
+                'service': services[2],
+                'title': 'Email Marketing Template Pack',
+                'description': 'Professional email marketing templates with high conversion rates.',
+                'file': '/templates/marketing/email-templates.zip',
+                'demo': 'https://demo.sademiy.com/email-templates'
+            },
+            # Graphic Design Templates
+            {
+                'service': services[3],  # Graphic Design
+                'title': 'Brand Identity Kit',
+                'description': 'Complete brand identity kit with logo, business cards, and letterhead templates.',
+                'file': '/templates/design/brand-identity.zip',
+                'demo': 'https://demo.sademiy.com/brand-identity'
+            },
+            {
+                'service': services[3],
+                'title': 'Marketing Materials Pack',
+                'description': 'Professional marketing materials including flyers, brochures, and posters.',
+                'file': '/templates/design/marketing-pack.zip',
+                'demo': 'https://demo.sademiy.com/marketing-materials'
+            },
+            # Video Production Templates
+            {
+                'service': services[4],  # Video Production
+                'title': 'Corporate Video Template',
+                'description': 'Professional corporate video template with motion graphics.',
+                'file': '/templates/video/corporate-video.zip',
+                'demo': 'https://demo.sademiy.com/corporate-video'
+            },
+            {
+                'service': services[4],
+                'title': 'Product Promotion Video Template',
+                'description': 'Engaging product promotion video template with animations.',
+                'file': '/templates/video/product-promo.zip',
+                'demo': 'https://demo.sademiy.com/product-promo'
+            },
+        ]
+        
+        templates = []
+        for data in template_data:
+            template = Template.objects.create(**data)
+            templates.append(template)
+            self.stdout.write(f"  ✓ Created template: {data['title']} for {data['service'].name}")
+        
+        self.stdout.write(f'  ✓ Created {len(templates)} templates total')
 
         # Create Orders
         self.stdout.write('Creating orders...')
@@ -325,6 +421,7 @@ class Command(BaseCommand):
         self.stdout.write(f'  • {Collaborator.objects.count()} Collaborators')
         self.stdout.write(f'  • {Client.objects.count()} Clients')
         self.stdout.write(f'  • {Service.objects.count()} Services ({Service.objects.filter(is_active=True).count()} active)')
+        self.stdout.write(f'  • {Template.objects.count()} Templates')
         self.stdout.write(f'  • {Status.objects.count()} Statuses')
         self.stdout.write(f'  • {Order.objects.count()} Orders')
         self.stdout.write(f'  • {Livrable.objects.count()} Livrables')
@@ -335,3 +432,7 @@ class Command(BaseCommand):
         self.stdout.write('  Collaborator: username=collaborator1, password=collab123')
         self.stdout.write('  Client: username=client1, password=client123')
         self.stdout.write('  (Phone login also available with phone number)')
+        
+        self.stdout.write('\nPublic Endpoints:')
+        self.stdout.write('  GET /api/services/ - List all active services with templates count')
+        self.stdout.write('  GET /api/services/{id}/ - Service details with templates and reviews')

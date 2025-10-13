@@ -5,7 +5,7 @@ Place this file in: core/serializers.py
 
 from rest_framework import serializers
 from django.contrib.auth import get_user_model, authenticate
-from core.models import Service, Review, Livrable, Order, Client
+from core.models import Service, Review, Livrable, Order, Client, Template
 
 User = get_user_model()
 
@@ -77,6 +77,15 @@ class UserSerializer(serializers.ModelSerializer):
             return None
 
 
+class TemplateSerializer(serializers.ModelSerializer):
+    """
+    Template serializer for displaying service templates
+    """
+    class Meta:
+        model = Template
+        fields = ['id', 'title', 'description', 'file', 'demo']
+
+
 class ReviewSerializer(serializers.ModelSerializer):
     """
     Review serializer
@@ -109,6 +118,7 @@ class ServiceListSerializer(serializers.ModelSerializer):
     """
     Service list serializer (for listing all active services)
     """
+    templates_count = serializers.SerializerMethodField()
     reviews_count = serializers.SerializerMethodField()
     average_rating = serializers.SerializerMethodField()
     
@@ -119,10 +129,15 @@ class ServiceListSerializer(serializers.ModelSerializer):
             'name',
             'price',
             'description',
+            'tool_name',
             'is_active',
+            'templates_count',
             'reviews_count',
             'average_rating'
         ]
+    
+    def get_templates_count(self, obj):
+        return obj.templates.count()
     
     def get_reviews_count(self, obj):
         # Count reviews for all orders with this service
@@ -170,14 +185,13 @@ class OrderSerializer(serializers.ModelSerializer):
 
 class ServiceDetailSerializer(serializers.ModelSerializer):
     """
-    Service detail serializer (with related orders, livrables, and reviews)
+    Service detail serializer (with related templates and reviews)
+    Public endpoint for visitors
     """
+    templates = TemplateSerializer(many=True, read_only=True)
     reviews_count = serializers.SerializerMethodField()
     average_rating = serializers.SerializerMethodField()
     recent_reviews = serializers.SerializerMethodField()
-    total_orders = serializers.SerializerMethodField()
-    completed_orders = serializers.SerializerMethodField()
-    sample_deliverables = serializers.SerializerMethodField()
     
     class Meta:
         model = Service
@@ -186,13 +200,12 @@ class ServiceDetailSerializer(serializers.ModelSerializer):
             'name',
             'price',
             'description',
+            'tool_name',
             'is_active',
+            'templates',
             'reviews_count',
             'average_rating',
-            'recent_reviews',
-            'total_orders',
-            'completed_orders',
-            'sample_deliverables'
+            'recent_reviews'
         ]
     
     def get_reviews_count(self, obj):
@@ -211,21 +224,6 @@ class ServiceDetailSerializer(serializers.ModelSerializer):
             livrable__order__service=obj
         ).order_by('-date')[:5]
         return ReviewSerializer(reviews, many=True).data
-    
-    def get_total_orders(self, obj):
-        return obj.orders.count()
-    
-    def get_completed_orders(self, obj):
-        return obj.orders.filter(status__name='Completed').count()
-    
-    def get_sample_deliverables(self, obj):
-        # Get sample livrables from completed orders
-        livrables = Livrable.objects.filter(
-            order__service=obj,
-            order__status__name='Completed',
-            is_accepted=True
-        )[:3]
-        return LivrableSerializer(livrables, many=True).data
 
 
 class AllReviewsSerializer(serializers.ModelSerializer):
