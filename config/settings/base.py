@@ -31,6 +31,7 @@ ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1', cast=Csv(
 # Application definition
 
 INSTALLED_APPS = [
+    'corsheaders',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -43,6 +44,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',  # <-- Must be first!
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -71,7 +73,12 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'config.wsgi.application'
 
+CORS_ALLOW_ALL_ORIGINS = False
 
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",  # Next.js default dev server
+    # "https://your-production-domain.com",
+]
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
