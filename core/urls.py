@@ -7,7 +7,11 @@ from core.views import (
     ReviewStatisticsAPIView,
     AllUsersListAPIView,
     CreateCollaboratorAPIView,
-    DeactivateUserAPIView
+    DeactivateUserAPIView,
+    ServiceAdminListAPIView,
+    ServiceCreateAPIView,
+    ServiceRetrieveUpdateDestroyAPIView,
+    ServiceToggleActiveAPIView
 )
 
 app_name = 'core'
@@ -28,4 +32,10 @@ urlpatterns = [
     path('admin/users/', AllUsersListAPIView.as_view(), name='admin-users-list'),
     path('admin/collaborators/', CreateCollaboratorAPIView.as_view(), name='admin-create-collaborator'),
     path('admin/users/<int:pk>/deactivate/', DeactivateUserAPIView.as_view(), name='admin-deactivate-user'),
+    
+    # Admin - Service Management (Admin Only)
+    path('admin/services/', ServiceAdminListAPIView.as_view(), name='admin-services-list'),
+    path('admin/services/create/', ServiceCreateAPIView.as_view(), name='admin-service-create'),
+    path('admin/services/<int:pk>/', ServiceRetrieveUpdateDestroyAPIView.as_view(), name='admin-service-detail'),
+    path('admin/services/<int:pk>/toggle-active/', ServiceToggleActiveAPIView.as_view(), name='admin-service-toggle-active'),
 ]

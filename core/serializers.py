@@ -127,10 +127,10 @@ class ServiceListSerializer(serializers.ModelSerializer):
         fields = [
             'id',
             'name',
-            'price',
             'description',
             'tool_name',
             'is_active',
+            'audio_file',
             'templates_count',
             'reviews_count',
             'average_rating'
@@ -198,10 +198,10 @@ class ServiceDetailSerializer(serializers.ModelSerializer):
         fields = [
             'id',
             'name',
-            'price',
             'description',
             'tool_name',
             'is_active',
+            'audio_file',
             'templates',
             'reviews_count',
             'average_rating',
@@ -392,3 +392,77 @@ class DeactivateUserSerializer(serializers.Serializer):
             instance.collaborator_profile.save()
         
         return instance
+
+
+# Service CRUD Serializers for Admin
+
+class ServiceCreateUpdateSerializer(serializers.ModelSerializer):
+    """
+    Serializer for creating and updating services (admin only)
+    """
+    class Meta:
+        model = Service
+        fields = [
+            'name',
+            'description',
+            'tool_name',
+            'is_active',
+            'audio_file'
+        ]
+    
+    def validate_name(self, value):
+        """Check if service name already exists (for create operations)"""
+        if self.instance is None:  # Creating new service
+            if Service.objects.filter(name=value).exists():
+                raise serializers.ValidationError('Service with this name already exists.')
+        return value
+
+
+class ServiceAdminListSerializer(serializers.ModelSerializer):
+    """
+    Serializer for listing all services (admin only) - includes active and inactive
+    """
+    templates_count = serializers.SerializerMethodField()
+    orders_count = serializers.SerializerMethodField()
+    reviews_count = serializers.SerializerMethodField()
+    average_rating = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Service
+        fields = [
+            'id',
+            'name',
+            'description',
+            'tool_name',
+            'is_active',
+            'audio_file',
+            'templates_count',
+            'orders_count',
+            'reviews_count',
+            'average_rating'
+        ]
+    
+    def get_templates_count(self, obj):
+        return obj.templates.count()
+    
+    def get_orders_count(self, obj):
+        return obj.orders.count()
+    
+    def get_reviews_count(self, obj):
+        return Review.objects.filter(livrable__order__service=obj).count()
+    
+    def get_average_rating(self, obj):
+        reviews = Review.objects.filter(livrable__order__service=obj)
+        if reviews.exists():
+            total = sum([review.rating for review in reviews])
+            return round(total / reviews.count(), 2)
+        return None
+
+
+class ServiceToggleActiveSerializer(serializers.ModelSerializer):
+    """
+    Serializer for toggling service active status (admin only)
+    """
+    class Meta:
+        model = Service
+        fields = ['is_active']

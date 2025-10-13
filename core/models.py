@@ -104,14 +104,10 @@ class Service(models.Model):
     Service model
     """
     name = models.CharField(max_length=200)
-    price = models.DecimalField(
-        max_digits=10, 
-        decimal_places=2,
-        validators=[MinValueValidator(Decimal('0.01'))]
-    )
     description = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
     tool_name = models.CharField(max_length=100, blank=True)
+    audio_file = models.FileField(upload_to='media/services/audio/', blank=True, null=True)
 
     class Meta:
         db_table = 'services'
@@ -120,7 +116,7 @@ class Service(models.Model):
         ordering = ['name']
 
     def __str__(self):
-        return f"{self.name} - ${self.price}"
+        return f"{self.name}"
 
 
 class Template(models.Model):

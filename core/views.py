@@ -13,7 +13,8 @@ from core.models import Service, Review
 from core.serializers import (
     LoginSerializer, UserSerializer, ServiceListSerializer,
     ServiceDetailSerializer, AllReviewsSerializer,
-    UserListSerializer, CreateCollaboratorSerializer, DeactivateUserSerializer
+    UserListSerializer, CreateCollaboratorSerializer, DeactivateUserSerializer,
+    ServiceCreateUpdateSerializer, ServiceAdminListSerializer, ServiceToggleActiveSerializer
 )
 from core.permissions import IsAdminUser
 
@@ -439,5 +440,211 @@ class DeactivateUserAPIView(APIView):
                     {'error': str(e)},
                     status=status.HTTP_400_BAD_REQUEST
                 )
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+# Service CRUD Views for Admin
+
+class ServiceAdminListAPIView(generics.ListAPIView):
+    """
+    GET /api/admin/services/
+    Get all services (admin only) - includes active and inactive with filtering
+    
+    Query parameters:
+    - is_active: Filter by active status (true/false)
+    - search: Search by name or description
+    
+    Examples:
+    - GET /api/admin/services/ - Get all services
+    - GET /api/admin/services/?is_active=true - Get only active services
+    - GET /api/admin/services/?is_active=false - Get only inactive services
+    - GET /api/admin/services/?search=web - Search services by name/description
+    
+    Response:
+    [
+        {
+            "id": 1,
+            "name": "Web Development",
+            "description": "Professional web development services...",
+            "tool_name": "React, Django",
+            "is_active": true,
+            "audio_file": "/media/services/audio/web-dev-intro.mp3",
+            "templates_count": 3,
+            "orders_count": 5,
+            "reviews_count": 5,
+            "average_rating": 4.8
+        }
+    ]
+    """
+    permission_classes = [IsAuthenticated, IsAdminUser]
+    serializer_class = ServiceAdminListSerializer
+    
+    def get_queryset(self):
+        from django.db import models
+        queryset = Service.objects.all().order_by('name')
+        
+        # Filter by active status
+        is_active = self.request.query_params.get('is_active', None)
+        if is_active is not None:
+            is_active_bool = is_active.lower() == 'true'
+            queryset = queryset.filter(is_active=is_active_bool)
+        
+        # Search by name or description
+        search = self.request.query_params.get('search', None)
+        if search:
+            queryset = queryset.filter(
+                models.Q(name__icontains=search) | 
+                models.Q(description__icontains=search)
+            )
+        
+        return queryset
+
+
+class ServiceCreateAPIView(generics.CreateAPIView):
+    """
+    POST /api/admin/services/
+    Create a new service (admin only)
+    
+    Request body (multipart/form-data for file upload):
+    {
+        "name": "Mobile App Development",
+        "description": "Professional mobile app development services...",
+        "tool_name": "React Native, Flutter",
+        "is_active": true,
+        "audio_file": <audio_file>
+    }
+    
+    Response:
+    {
+        "id": 3,
+        "name": "Mobile App Development",
+        "description": "Professional mobile app development services...",
+        "tool_name": "React Native, Flutter",
+        "is_active": true,
+        "audio_file": "/media/services/audio/mobile-dev-intro.mp3"
+    }
+    """
+    permission_classes = [IsAuthenticated, IsAdminUser]
+    serializer_class = ServiceCreateUpdateSerializer
+
+
+class ServiceRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    GET /api/admin/services/{id}/
+    PUT /api/admin/services/{id}/
+    PATCH /api/admin/services/{id}/
+    DELETE /api/admin/services/{id}/
+    
+    Retrieve, update, or delete a service (admin only)
+    
+    GET Response:
+    {
+        "id": 1,
+        "name": "Web Development",
+        "description": "Professional web development services...",
+        "tool_name": "React, Django",
+        "is_active": true,
+        "audio_file": "/media/services/audio/web-dev-intro.mp3"
+    }
+    
+    PUT/PATCH Request body (multipart/form-data for file upload):
+    {
+        "name": "Web Development Updated",
+        "description": "Updated description...",
+        "tool_name": "React, Django, PostgreSQL",
+        "is_active": true,
+        "audio_file": <new_audio_file>
+    }
+    
+    DELETE Response:
+    Success (200):
+    {
+        "message": "Service deleted successfully"
+    }
+    
+    Error (400) - Service has associated orders:
+    {
+        "error": "Cannot delete service",
+        "message": "This service cannot be deleted because it has 1 associated order(s). Please deactivate the service instead or delete the associated orders first.",
+        "orders_count": 1
+    }
+    """
+    permission_classes = [IsAuthenticated, IsAdminUser]
+    serializer_class = ServiceCreateUpdateSerializer
+    queryset = Service.objects.all()
+    
+    def destroy(self, request, *args, **kwargs):
+        from django.db.models.deletion import ProtectedError
+        
+        try:
+            instance = self.get_object()
+            self.perform_destroy(instance)
+            return Response(
+                {'message': 'Service deleted successfully'},
+                status=status.HTTP_200_OK
+            )
+        except ProtectedError as e:
+            # Get the count of related orders
+            orders_count = instance.orders.count()
+            return Response(
+                {
+                    'error': 'Cannot delete service',
+                    'message': f'This service cannot be deleted because it has {orders_count} associated order(s). Please deactivate the service instead or delete the associated orders first.',
+                    'orders_count': orders_count
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+
+class ServiceToggleActiveAPIView(APIView):
+    """
+    PATCH /api/admin/services/{id}/toggle-active/
+    Toggle service active status (admin only)
+    
+    Request body:
+    {
+        "is_active": false
+    }
+    
+    Response:
+    {
+        "message": "Service deactivated successfully",
+        "service": {
+            "id": 1,
+            "name": "Web Development",
+            "description": "Professional web development services...",
+            "tool_name": "React, Django",
+            "is_active": false,
+            "audio_file": "/media/services/audio/web-dev-intro.mp3"
+        }
+    }
+    """
+    permission_classes = [IsAuthenticated, IsAdminUser]
+    
+    def patch(self, request, pk):
+        try:
+            service = Service.objects.get(pk=pk)
+        except Service.DoesNotExist:
+            return Response(
+                {'error': 'Service not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        serializer = ServiceToggleActiveSerializer(
+            service, 
+            data=request.data, 
+            partial=True
+        )
+        
+        if serializer.is_valid():
+            updated_service = serializer.save()
+            is_active = request.data.get('is_active')
+            message = 'Service activated successfully' if is_active else 'Service deactivated successfully'
+            
+            return Response({
+                'message': message,
+                'service': ServiceCreateUpdateSerializer(updated_service).data
+            }, status=status.HTTP_200_OK)
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
