@@ -246,6 +246,7 @@ class Livrable(models.Model):
     description = models.TextField(blank=True)
     file_path = models.FileField(upload_to='livrables/', blank=True, null=True)
     is_accepted = models.BooleanField(default=False)
+    is_reviewed_by_admin = models.BooleanField(default=False)
 
     class Meta:
         db_table = 'livrables'

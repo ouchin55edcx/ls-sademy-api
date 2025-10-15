@@ -185,7 +185,125 @@ class LivrableSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Livrable
-        fields = ['id', 'name', 'description', 'is_accepted', 'reviews']
+        fields = ['id', 'name', 'description', 'is_accepted', 'is_reviewed_by_admin', 'reviews']
+
+
+class LivrableCreateUpdateSerializer(serializers.ModelSerializer):
+    """
+    Serializer for creating and updating livrables (collaborator only)
+    """
+    class Meta:
+        model = Livrable
+        fields = ['order', 'name', 'description', 'file_path']
+    
+    def validate_order(self, value):
+        """Validate that the order exists and is assigned to the collaborator"""
+        if not value:
+            raise serializers.ValidationError('Order is required.')
+        
+        # Check if order is assigned to the current collaborator
+        request = self.context.get('request')
+        if request and hasattr(request.user, 'collaborator_profile'):
+            if value.collaborator != request.user.collaborator_profile:
+                raise serializers.ValidationError('You can only create livrables for orders assigned to you.')
+        
+        return value
+    
+    def validate_name(self, value):
+        """Validate livrable name"""
+        if not value or not value.strip():
+            raise serializers.ValidationError('Livrable name is required.')
+        return value.strip()
+
+
+class LivrableListSerializer(serializers.ModelSerializer):
+    """
+    Serializer for listing livrables with order and client information
+    """
+    order_id = serializers.IntegerField(source='order.id', read_only=True)
+    client_name = serializers.SerializerMethodField()
+    service_name = serializers.CharField(source='order.service.name', read_only=True)
+    status_name = serializers.CharField(source='order.status.name', read_only=True)
+    collaborator_name = serializers.SerializerMethodField()
+    reviews_count = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Livrable
+        fields = [
+            'id', 'name', 'description', 'is_accepted', 'is_reviewed_by_admin', 'file_path',
+            'order_id', 'client_name', 'service_name', 'status_name',
+            'collaborator_name', 'reviews_count'
+        ]
+    
+    def get_client_name(self, obj):
+        return obj.order.client.user.get_full_name() or obj.order.client.user.username
+    
+    def get_collaborator_name(self, obj):
+        if obj.order.collaborator:
+            return obj.order.collaborator.user.get_full_name() or obj.order.collaborator.user.username
+        return "Unassigned"
+    
+    def get_reviews_count(self, obj):
+        return obj.reviews.count()
+
+
+class LivrableDetailSerializer(serializers.ModelSerializer):
+    """
+    Serializer for detailed livrable view with all related information
+    """
+    order_id = serializers.IntegerField(source='order.id', read_only=True)
+    client_name = serializers.SerializerMethodField()
+    client_email = serializers.CharField(source='order.client.user.email', read_only=True)
+    service_name = serializers.CharField(source='order.service.name', read_only=True)
+    status_name = serializers.CharField(source='order.status.name', read_only=True)
+    collaborator_name = serializers.SerializerMethodField()
+    reviews = ReviewSerializer(many=True, read_only=True)
+    
+    class Meta:
+        model = Livrable
+        fields = [
+            'id', 'name', 'description', 'is_accepted', 'is_reviewed_by_admin', 'file_path',
+            'order_id', 'client_name', 'client_email', 'service_name',
+            'status_name', 'collaborator_name', 'reviews'
+        ]
+    
+    def get_client_name(self, obj):
+        return obj.order.client.user.get_full_name() or obj.order.client.user.username
+    
+    def get_collaborator_name(self, obj):
+        if obj.order.collaborator:
+            return obj.order.collaborator.user.get_full_name() or obj.order.collaborator.user.username
+        return "Unassigned"
+
+
+class LivrableAcceptRejectSerializer(serializers.ModelSerializer):
+    """
+    Serializer for client to accept or reject livrables
+    """
+    class Meta:
+        model = Livrable
+        fields = ['is_accepted']
+    
+    def validate_is_accepted(self, value):
+        """Validate acceptance status"""
+        if value is None:
+            raise serializers.ValidationError('is_accepted field is required.')
+        return value
+
+
+class LivrableAdminReviewSerializer(serializers.ModelSerializer):
+    """
+    Serializer for admin to mark livrables as reviewed
+    """
+    class Meta:
+        model = Livrable
+        fields = ['is_reviewed_by_admin']
+    
+    def validate_is_reviewed_by_admin(self, value):
+        """Validate review status"""
+        if value is None:
+            raise serializers.ValidationError('is_reviewed_by_admin field is required.')
+        return value
 
 
 class OrderSerializer(serializers.ModelSerializer):

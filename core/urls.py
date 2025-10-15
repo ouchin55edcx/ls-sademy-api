@@ -22,7 +22,14 @@ from core.views import (
     StatusListAPIView,
     ActiveCollaboratorListAPIView,
     CollaboratorOrderListAPIView,
-    ClientOrderListAPIView
+    ClientOrderListAPIView,
+    CollaboratorLivrableListCreateAPIView,
+    CollaboratorLivrableRetrieveUpdateDestroyAPIView,
+    AdminLivrableListAPIView,
+    AdminLivrableRetrieveAPIView,
+    AdminLivrableReviewAPIView,
+    ClientLivrableListAPIView,
+    ClientLivrableAcceptRejectAPIView
 )
 
 app_name = 'core'
@@ -70,4 +77,17 @@ urlpatterns = [
     
     # Client - Order Management (Client Only)
     path('client/orders/', ClientOrderListAPIView.as_view(), name='client-orders-list'),
+    
+    # Collaborator - Livrable Management (Collaborator Only)
+    path('collaborator/livrables/', CollaboratorLivrableListCreateAPIView.as_view(), name='collaborator-livrables-list-create'),
+    path('collaborator/livrables/<int:pk>/', CollaboratorLivrableRetrieveUpdateDestroyAPIView.as_view(), name='collaborator-livrable-detail'),
+    
+    # Admin - Livrable Review (Admin Only)
+    path('admin/livrables/', AdminLivrableListAPIView.as_view(), name='admin-livrables-list'),
+    path('admin/livrables/<int:pk>/', AdminLivrableRetrieveAPIView.as_view(), name='admin-livrable-detail'),
+    path('admin/livrables/<int:pk>/review/', AdminLivrableReviewAPIView.as_view(), name='admin-livrable-review'),
+    
+    # Client - Livrable Management (Client Only)
+    path('client/livrables/', ClientLivrableListAPIView.as_view(), name='client-livrables-list'),
+    path('client/livrables/<int:pk>/accept-reject/', ClientLivrableAcceptRejectAPIView.as_view(), name='client-livrable-accept-reject'),
 ]

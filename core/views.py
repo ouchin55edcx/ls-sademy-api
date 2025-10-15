@@ -9,7 +9,7 @@ from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.authtoken.models import Token
 from django.contrib.auth import login, get_user_model
-from core.models import Service, Review, Template, Order, Status, Collaborator
+from core.models import Service, Review, Template, Order, Status, Collaborator, Livrable
 from core.serializers import (
     LoginSerializer, UserSerializer, ServiceListSerializer,
     ServiceDetailSerializer, AllReviewsSerializer,
@@ -18,9 +18,11 @@ from core.serializers import (
     TemplateSerializer, TemplateCreateUpdateSerializer,
     OrderListSerializer, OrderCreateUpdateSerializer, OrderDetailSerializer,
     OrderStatusUpdateSerializer, OrderCollaboratorAssignSerializer,
-    StatusSerializer, ActiveCollaboratorListSerializer
+    StatusSerializer, ActiveCollaboratorListSerializer,
+    LivrableCreateUpdateSerializer, LivrableListSerializer, LivrableDetailSerializer,
+    LivrableAcceptRejectSerializer, LivrableAdminReviewSerializer
 )
-from core.permissions import IsAdminUser
+from core.permissions import IsAdminUser, IsCollaboratorUser, IsClientUser, IsAdminOrCollaboratorUser
 
 User = get_user_model()
 
@@ -1158,3 +1160,189 @@ class ClientOrderListAPIView(generics.ListAPIView):
             return [IsAuthenticated()]
         else:
             return [IsAdminUser()]
+
+
+# ==================== LIVRABLE ENDPOINTS ====================
+
+class CollaboratorLivrableListCreateAPIView(generics.ListCreateAPIView):
+    """
+    GET /api/collaborator/livrables/
+    POST /api/collaborator/livrables/
+    
+    List and create livrables for the authenticated collaborator
+    """
+    permission_classes = [IsCollaboratorUser]
+    
+    def get_serializer_class(self):
+        if self.request.method == 'GET':
+            return LivrableListSerializer
+        return LivrableCreateUpdateSerializer
+    
+    def get_queryset(self):
+        """Return livrables for orders assigned to the authenticated collaborator"""
+        return Livrable.objects.filter(
+            order__collaborator__user=self.request.user
+        ).select_related(
+            'order__client__user', 'order__service', 'order__status', 'order__collaborator__user'
+        ).prefetch_related('reviews').all()
+    
+    def perform_create(self, serializer):
+        """Set the order and validate collaborator assignment"""
+        order = serializer.validated_data['order']
+        
+        # Double-check that the order is assigned to this collaborator
+        if order.collaborator != self.request.user.collaborator_profile:
+            raise serializers.ValidationError('You can only create livrables for orders assigned to you.')
+        
+        serializer.save()
+
+
+class CollaboratorLivrableRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    GET /api/collaborator/livrables/{id}/
+    PUT /api/collaborator/livrables/{id}/
+    PATCH /api/collaborator/livrables/{id}/
+    DELETE /api/collaborator/livrables/{id}/
+    
+    Retrieve, update, or delete a specific livrable (collaborator only)
+    """
+    permission_classes = [IsCollaboratorUser]
+    
+    def get_serializer_class(self):
+        if self.request.method == 'GET':
+            return LivrableDetailSerializer
+        return LivrableCreateUpdateSerializer
+    
+    def get_queryset(self):
+        """Return livrables for orders assigned to the authenticated collaborator"""
+        return Livrable.objects.filter(
+            order__collaborator__user=self.request.user
+        ).select_related(
+            'order__client__user', 'order__service', 'order__status', 'order__collaborator__user'
+        ).prefetch_related('reviews').all()
+    
+    def perform_update(self, serializer):
+        """Validate that the collaborator can update this livrable"""
+        order = serializer.validated_data.get('order', self.get_object().order)
+        
+        # Check if order is assigned to this collaborator
+        if order.collaborator != self.request.user.collaborator_profile:
+            raise serializers.ValidationError('You can only update livrables for orders assigned to you.')
+        
+        serializer.save()
+
+
+class AdminLivrableListAPIView(generics.ListAPIView):
+    """
+    GET /api/admin/livrables/
+    
+    List all livrables for admin review (admin only)
+    """
+    permission_classes = [IsAdminUser]
+    serializer_class = LivrableListSerializer
+    
+    def get_queryset(self):
+        """Return all livrables with completed orders"""
+        return Livrable.objects.filter(
+            order__status__name='Completed'
+        ).select_related(
+            'order__client__user', 'order__service', 'order__status', 'order__collaborator__user'
+        ).prefetch_related('reviews').all()
+
+
+class AdminLivrableRetrieveAPIView(generics.RetrieveAPIView):
+    """
+    GET /api/admin/livrables/{id}/
+    
+    Retrieve a specific livrable for admin review (admin only)
+    """
+    permission_classes = [IsAdminUser]
+    serializer_class = LivrableDetailSerializer
+    
+    def get_queryset(self):
+        """Return livrables with completed orders"""
+        return Livrable.objects.filter(
+            order__status__name='Completed'
+        ).select_related(
+            'order__client__user', 'order__service', 'order__status', 'order__collaborator__user'
+        ).prefetch_related('reviews').all()
+
+
+class AdminLivrableReviewAPIView(generics.UpdateAPIView):
+    """
+    PATCH /api/admin/livrables/{id}/review/
+    
+    Mark a livrable as reviewed by admin (admin only)
+    """
+    permission_classes = [IsAdminUser]
+    serializer_class = LivrableAdminReviewSerializer
+    
+    def get_queryset(self):
+        """Return livrables with completed orders"""
+        return Livrable.objects.filter(
+            order__status__name='Completed'
+        ).select_related(
+            'order__client__user', 'order__service', 'order__status', 'order__collaborator__user'
+        ).prefetch_related('reviews').all()
+    
+    def perform_update(self, serializer):
+        """Update the livrable review status"""
+        is_reviewed = serializer.validated_data['is_reviewed_by_admin']
+        
+        if is_reviewed:
+            # If marking as reviewed, we could trigger additional actions here
+            # like sending notifications to the client, etc.
+            pass
+        
+        serializer.save()
+
+
+class ClientLivrableListAPIView(generics.ListAPIView):
+    """
+    GET /api/client/livrables/
+    
+    List livrables for the authenticated client (completed and reviewed by admin)
+    """
+    permission_classes = [IsClientUser]
+    serializer_class = LivrableDetailSerializer
+    
+    def get_queryset(self):
+        """Return livrables for the client's completed orders that have been reviewed by admin"""
+        return Livrable.objects.filter(
+            order__client__user=self.request.user,
+            order__status__name='Completed',
+            is_reviewed_by_admin=True
+        ).select_related(
+            'order__client__user', 'order__service', 'order__status', 'order__collaborator__user'
+        ).prefetch_related('reviews').all()
+
+
+class ClientLivrableAcceptRejectAPIView(generics.UpdateAPIView):
+    """
+    PATCH /api/client/livrables/{id}/accept-reject/
+    
+    Accept or reject a livrable (client only) - only works with reviewed livrables
+    """
+    permission_classes = [IsClientUser]
+    serializer_class = LivrableAcceptRejectSerializer
+    
+    def get_queryset(self):
+        """Return livrables for the client's completed orders that have been reviewed by admin"""
+        return Livrable.objects.filter(
+            order__client__user=self.request.user,
+            order__status__name='Completed',
+            is_reviewed_by_admin=True
+        ).select_related(
+            'order__client__user', 'order__service', 'order__status', 'order__collaborator__user'
+        ).prefetch_related('reviews').all()
+    
+    def perform_update(self, serializer):
+        """Update the livrable acceptance status"""
+        is_accepted = serializer.validated_data['is_accepted']
+        
+        if is_accepted:
+            # If accepting, we could trigger additional actions here
+            # like sending notifications, updating order status, etc.
+            pass
+        
+        serializer.save()
