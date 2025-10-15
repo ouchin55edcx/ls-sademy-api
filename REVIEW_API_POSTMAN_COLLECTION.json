@@ -1,0 +1,276 @@
+{
+  "info": {
+    "name": "Review API Collection",
+    "description": "Complete collection for testing Review API endpoints",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{auth_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000/api",
+      "type": "string"
+    },
+    {
+      "key": "auth_token",
+      "value": "your-auth-token-here",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Client Reviews",
+      "item": [
+        {
+          "name": "List Client Reviews",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Token {{auth_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/client/reviews/",
+              "host": ["{{base_url}}"],
+              "path": ["client", "reviews", ""]
+            }
+          }
+        },
+        {
+          "name": "Create Review",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Token {{auth_token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"order\": 1,\n  \"rating\": 5,\n  \"comment\": \"Excellent work! Very professional and delivered on time.\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/client/reviews/",
+              "host": ["{{base_url}}"],
+              "path": ["client", "reviews", ""]
+            }
+          }
+        },
+        {
+          "name": "Get Review Details",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Token {{auth_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/client/reviews/1/",
+              "host": ["{{base_url}}"],
+              "path": ["client", "reviews", "1", ""]
+            }
+          }
+        },
+        {
+          "name": "Update Review (PUT)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Token {{auth_token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"order\": 1,\n  \"rating\": 4,\n  \"comment\": \"Updated comment: Very good work with minor improvements needed.\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/client/reviews/1/",
+              "host": ["{{base_url}}"],
+              "path": ["client", "reviews", "1", ""]
+            }
+          }
+        },
+        {
+          "name": "Update Review (PATCH)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Token {{auth_token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"rating\": 4,\n  \"comment\": \"Updated comment: Very good work with minor improvements needed.\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/client/reviews/1/",
+              "host": ["{{base_url}}"],
+              "path": ["client", "reviews", "1", ""]
+            }
+          }
+        },
+        {
+          "name": "Delete Review",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Token {{auth_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/client/reviews/1/",
+              "host": ["{{base_url}}"],
+              "path": ["client", "reviews", "1", ""]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Public Reviews",
+      "item": [
+        {
+          "name": "List All Reviews",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/reviews/",
+              "host": ["{{base_url}}"],
+              "path": ["reviews", ""]
+            }
+          }
+        },
+        {
+          "name": "List Reviews by Service",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/reviews/?service_id=1",
+              "host": ["{{base_url}}"],
+              "path": ["reviews", ""],
+              "query": [
+                {
+                  "key": "service_id",
+                  "value": "1"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List Reviews by Rating",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/reviews/?rating=5",
+              "host": ["{{base_url}}"],
+              "path": ["reviews", ""],
+              "query": [
+                {
+                  "key": "rating",
+                  "value": "5"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List Reviews with Ordering",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/reviews/?ordering=date",
+              "host": ["{{base_url}}"],
+              "path": ["reviews", ""],
+              "query": [
+                {
+                  "key": "ordering",
+                  "value": "date"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Review Statistics",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/reviews/statistics/",
+              "host": ["{{base_url}}"],
+              "path": ["reviews", "statistics", ""]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username_or_phone\": \"client1\",\n  \"password\": \"client123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/login/",
+              "host": ["{{base_url}}"],
+              "path": ["login", ""]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -113,30 +113,116 @@ class TemplateCreateUpdateSerializer(serializers.ModelSerializer):
 
 class ReviewSerializer(serializers.ModelSerializer):
     """
-    Review serializer
+    Review serializer for displaying reviews
     """
-    livrable_name = serializers.CharField(source='livrable.name', read_only=True)
-    order_id = serializers.IntegerField(source='livrable.order.id', read_only=True)
+    order_id = serializers.IntegerField(source='order.id', read_only=True)
     client_name = serializers.SerializerMethodField()
-    service_name = serializers.CharField(source='livrable.order.service.name', read_only=True)
+    service_name = serializers.CharField(source='order.service.name', read_only=True)
+    can_be_updated = serializers.SerializerMethodField()
     
     class Meta:
         model = Review
         fields = [
             'id', 
-            'livrable', 
-            'livrable_name',
+            'order', 
             'order_id',
             'client_name',
             'service_name',
             'rating', 
             'comment', 
-            'date'
+            'date',
+            'updated_at',
+            'can_be_updated'
         ]
-        read_only_fields = ['date']
+        read_only_fields = ['date', 'updated_at', 'can_be_updated']
     
     def get_client_name(self, obj):
-        return obj.livrable.order.client.user.get_full_name() or obj.livrable.order.client.user.username
+        if obj.client and obj.client.user:
+            return obj.client.user.get_full_name() or obj.client.user.username
+        return "Unknown Client"
+    
+    def get_can_be_updated(self, obj):
+        return obj.can_be_updated()
+
+
+class ReviewCreateUpdateSerializer(serializers.ModelSerializer):
+    """
+    Serializer for creating and updating reviews (client only)
+    """
+    class Meta:
+        model = Review
+        fields = ['order', 'rating', 'comment']
+    
+    def validate_order(self, value):
+        """Validate that the order exists and belongs to the client"""
+        if not value:
+            raise serializers.ValidationError('Order is required.')
+        
+        # Check if order belongs to the current client
+        request = self.context.get('request')
+        if request and hasattr(request.user, 'client_profile'):
+            if value.client != request.user.client_profile:
+                raise serializers.ValidationError('You can only review your own orders.')
+        
+        # Check if order is completed and accepted
+        if value.status.name != 'Completed':
+            raise serializers.ValidationError('You can only review completed orders.')
+        
+        # Check if order has been reviewed by admin and accepted by client
+        livrables = value.livrables.all()
+        if not livrables.exists():
+            raise serializers.ValidationError('Order has no livrables to review.')
+        
+        # Check if at least one livrable is reviewed by admin and accepted by client
+        has_reviewed_and_accepted = any(
+            livrable.is_reviewed_by_admin and livrable.is_accepted 
+            for livrable in livrables
+        )
+        
+        if not has_reviewed_and_accepted:
+            raise serializers.ValidationError(
+                'You can only review orders that have been reviewed by admin and accepted by you.'
+            )
+        
+        return value
+    
+    def validate_rating(self, value):
+        """Validate rating"""
+        if not (1 <= value <= 5):
+            raise serializers.ValidationError('Rating must be between 1 and 5.')
+        return value
+    
+    def validate(self, data):
+        """Cross-field validation"""
+        order = data.get('order')
+        request = self.context.get('request')
+        
+        if order and request and hasattr(request.user, 'client_profile'):
+            # Check if review already exists for this order
+            existing_review = Review.objects.filter(
+                order=order,
+                client=request.user.client_profile
+            ).first()
+            
+            if existing_review and not self.instance:
+                raise serializers.ValidationError(
+                    'You have already reviewed this order. You can only update your review within 24 hours.'
+                )
+            
+            # If updating, check if it's within 24 hours
+            if self.instance and not self.instance.can_be_updated():
+                raise serializers.ValidationError(
+                    'You can only update your review within 24 hours of creating it.'
+                )
+        
+        return data
+    
+    def create(self, validated_data):
+        """Create review with client from request"""
+        request = self.context.get('request')
+        if request and hasattr(request.user, 'client_profile'):
+            validated_data['client'] = request.user.client_profile
+        return super().create(validated_data)
 
 
 class ServiceListSerializer(serializers.ModelSerializer):
@@ -167,12 +253,13 @@ class ServiceListSerializer(serializers.ModelSerializer):
     def get_reviews_count(self, obj):
         # Count reviews for all orders with this service
         return Review.objects.filter(
-            livrable__order__service=obj
+            order__service=obj,
+            client__isnull=False
         ).count()
     
     def get_average_rating(self, obj):
         # Calculate average rating for this service
-        reviews = Review.objects.filter(livrable__order__service=obj)
+        reviews = Review.objects.filter(order__service=obj, client__isnull=False)
         if reviews.exists():
             total = sum([review.rating for review in reviews])
             return round(total / reviews.count(), 2)
@@ -181,11 +268,16 @@ class ServiceListSerializer(serializers.ModelSerializer):
 
 class LivrableSerializer(serializers.ModelSerializer):
     """Livrable serializer for service details"""
-    reviews = ReviewSerializer(many=True, read_only=True)
+    reviews = serializers.SerializerMethodField()
     
     class Meta:
         model = Livrable
         fields = ['id', 'name', 'description', 'is_accepted', 'is_reviewed_by_admin', 'reviews']
+    
+    def get_reviews(self, obj):
+        """Get reviews for the order this livrable belongs to"""
+        order_reviews = Review.objects.filter(order=obj.order, client__isnull=False)
+        return ReviewSerializer(order_reviews, many=True).data
 
 
 class LivrableCreateUpdateSerializer(serializers.ModelSerializer):
@@ -244,7 +336,7 @@ class LivrableListSerializer(serializers.ModelSerializer):
         return "Unassigned"
     
     def get_reviews_count(self, obj):
-        return obj.reviews.count()
+        return Review.objects.filter(order=obj.order, client__isnull=False).count()
 
 
 class LivrableDetailSerializer(serializers.ModelSerializer):
@@ -257,7 +349,7 @@ class LivrableDetailSerializer(serializers.ModelSerializer):
     service_name = serializers.CharField(source='order.service.name', read_only=True)
     status_name = serializers.CharField(source='order.status.name', read_only=True)
     collaborator_name = serializers.SerializerMethodField()
-    reviews = ReviewSerializer(many=True, read_only=True)
+    reviews = serializers.SerializerMethodField()
     
     class Meta:
         model = Livrable
@@ -274,6 +366,11 @@ class LivrableDetailSerializer(serializers.ModelSerializer):
         if obj.order.collaborator:
             return obj.order.collaborator.user.get_full_name() or obj.order.collaborator.user.username
         return "Unassigned"
+    
+    def get_reviews(self, obj):
+        """Get reviews for the order this livrable belongs to"""
+        order_reviews = Review.objects.filter(order=obj.order, client__isnull=False)
+        return ReviewSerializer(order_reviews, many=True).data
 
 
 class LivrableAcceptRejectSerializer(serializers.ModelSerializer):
@@ -352,10 +449,10 @@ class ServiceDetailSerializer(serializers.ModelSerializer):
         ]
     
     def get_reviews_count(self, obj):
-        return Review.objects.filter(livrable__order__service=obj).count()
+        return Review.objects.filter(order__service=obj, client__isnull=False).count()
     
     def get_average_rating(self, obj):
-        reviews = Review.objects.filter(livrable__order__service=obj)
+        reviews = Review.objects.filter(order__service=obj, client__isnull=False)
         if reviews.exists():
             total = sum([review.rating for review in reviews])
             return round(total / reviews.count(), 2)
@@ -364,7 +461,8 @@ class ServiceDetailSerializer(serializers.ModelSerializer):
     def get_recent_reviews(self, obj):
         # Get last 5 reviews for this service
         reviews = Review.objects.filter(
-            livrable__order__service=obj
+            order__service=obj,
+            client__isnull=False
         ).order_by('-date')[:5]
         return ReviewSerializer(reviews, many=True).data
 
@@ -373,18 +471,18 @@ class AllReviewsSerializer(serializers.ModelSerializer):
     """
     Serializer for all reviews listing
     """
-    service_name = serializers.CharField(source='livrable.order.service.name', read_only=True)
-    service_id = serializers.IntegerField(source='livrable.order.service.id', read_only=True)
+    service_name = serializers.CharField(source='order.service.name', read_only=True)
+    service_id = serializers.IntegerField(source='order.service.id', read_only=True)
     client_name = serializers.SerializerMethodField()
-    livrable_name = serializers.CharField(source='livrable.name', read_only=True)
+    order_id = serializers.IntegerField(source='order.id', read_only=True)
     
     class Meta:
         model = Review
         fields = [
             'id',
+            'order_id',
             'service_id',
             'service_name',
-            'livrable_name',
             'client_name',
             'rating',
             'comment',
@@ -392,7 +490,9 @@ class AllReviewsSerializer(serializers.ModelSerializer):
         ]
     
     def get_client_name(self, obj):
-        return obj.livrable.order.client.user.get_full_name() or obj.livrable.order.client.user.username
+        if obj.client and obj.client.user:
+            return obj.client.user.get_full_name() or obj.client.user.username
+        return "Unknown Client"
 
 
 # Admin User Management Serializers
@@ -592,10 +692,10 @@ class ServiceAdminListSerializer(serializers.ModelSerializer):
         return obj.orders.count()
     
     def get_reviews_count(self, obj):
-        return Review.objects.filter(livrable__order__service=obj).count()
+        return Review.objects.filter(order__service=obj, client__isnull=False).count()
     
     def get_average_rating(self, obj):
-        reviews = Review.objects.filter(livrable__order__service=obj)
+        reviews = Review.objects.filter(order__service=obj, client__isnull=False)
         if reviews.exists():
             total = sum([review.rating for review in reviews])
             return round(total / reviews.count(), 2)

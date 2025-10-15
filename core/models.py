@@ -259,13 +259,23 @@ class Livrable(models.Model):
 
 class Review(models.Model):
     """
-    Review model - linked to Livrable
-    Client can review the deliverable
+    Review model - linked to Order
+    Client can review the order after it's completed and accepted
+    Only one review per order per client, can be updated within 24 hours
     """
-    livrable = models.ForeignKey(
-        Livrable,
+    order = models.ForeignKey(
+        Order,
         on_delete=models.CASCADE,
-        related_name='reviews'
+        related_name='reviews',
+        null=True,  # Allow null temporarily for migration
+        blank=True
+    )
+    client = models.ForeignKey(
+        Client,
+        on_delete=models.CASCADE,
+        related_name='reviews',
+        null=True,  # Allow null temporarily for migration
+        blank=True
     )
     rating = models.IntegerField(
         validators=[MinValueValidator(1), MaxValueValidator(5)],
@@ -273,12 +283,22 @@ class Review(models.Model):
     )
     comment = models.TextField(blank=True)
     date = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = 'reviews'
         verbose_name = 'Review'
         verbose_name_plural = 'Reviews'
         ordering = ['-date']
+        unique_together = ['order', 'client']  # One review per order per client
 
     def __str__(self):
-        return f"Review for {self.livrable.name} - {self.rating} stars"
+        return f"Review for Order #{self.order.id} by {self.client.user.username} - {self.rating} stars"
+    
+    def can_be_updated(self):
+        """Check if review can be updated (within 24 hours of creation)"""
+        from django.utils import timezone
+        from datetime import timedelta
+        
+        time_diff = timezone.now() - self.date
+        return time_diff <= timedelta(hours=24)

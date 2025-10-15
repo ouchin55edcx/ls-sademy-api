@@ -29,7 +29,9 @@ from core.views import (
     AdminLivrableRetrieveAPIView,
     AdminLivrableReviewAPIView,
     ClientLivrableListAPIView,
-    ClientLivrableAcceptRejectAPIView
+    ClientLivrableAcceptRejectAPIView,
+    ClientReviewListCreateAPIView,
+    ClientReviewRetrieveUpdateDestroyAPIView
 )
 
 app_name = 'core'
@@ -90,4 +92,8 @@ urlpatterns = [
     # Client - Livrable Management (Client Only)
     path('client/livrables/', ClientLivrableListAPIView.as_view(), name='client-livrables-list'),
     path('client/livrables/<int:pk>/accept-reject/', ClientLivrableAcceptRejectAPIView.as_view(), name='client-livrable-accept-reject'),
+    
+    # Client - Review Management (Client Only)
+    path('client/reviews/', ClientReviewListCreateAPIView.as_view(), name='client-reviews-list-create'),
+    path('client/reviews/<int:pk>/', ClientReviewRetrieveUpdateDestroyAPIView.as_view(), name='client-review-detail'),
 ]

@@ -12,7 +12,7 @@ from django.contrib.auth import login, get_user_model
 from core.models import Service, Review, Template, Order, Status, Collaborator, Livrable
 from core.serializers import (
     LoginSerializer, UserSerializer, ServiceListSerializer,
-    ServiceDetailSerializer, AllReviewsSerializer,
+    ServiceDetailSerializer, AllReviewsSerializer, ReviewSerializer, ReviewCreateUpdateSerializer,
     UserListSerializer, CreateCollaboratorSerializer, DeactivateUserSerializer,
     ServiceCreateUpdateSerializer, ServiceAdminListSerializer, ServiceToggleActiveSerializer,
     TemplateSerializer, TemplateCreateUpdateSerializer,
@@ -195,14 +195,15 @@ class AllReviewsListAPIView(generics.ListAPIView):
     
     def get_queryset(self):
         queryset = Review.objects.select_related(
-            'livrable__order__service',
-            'livrable__order__client__user'
-        ).all()
+            'order__service',
+            'order__client__user',
+            'client__user'
+        ).filter(client__isnull=False)
         
         # Filter by service_id if provided
         service_id = self.request.query_params.get('service_id', None)
         if service_id:
-            queryset = queryset.filter(livrable__order__service__id=service_id)
+            queryset = queryset.filter(order__service__id=service_id)
         
         # Filter by rating if provided
         rating = self.request.query_params.get('rating', None)
@@ -238,7 +239,7 @@ class ReviewStatisticsAPIView(APIView):
     permission_classes = [AllowAny]
     
     def get(self, request):
-        reviews = Review.objects.all()
+        reviews = Review.objects.filter(client__isnull=False)
         total_reviews = reviews.count()
         
         if total_reviews == 0:
@@ -266,7 +267,7 @@ class ReviewStatisticsAPIView(APIView):
         
         # Services with reviews
         services_with_reviews = Service.objects.filter(
-            orders__livrables__reviews__isnull=False
+            orders__reviews__isnull=False
         ).distinct().count()
         
         return Response({
@@ -1184,7 +1185,7 @@ class CollaboratorLivrableListCreateAPIView(generics.ListCreateAPIView):
             order__collaborator__user=self.request.user
         ).select_related(
             'order__client__user', 'order__service', 'order__status', 'order__collaborator__user'
-        ).prefetch_related('reviews').all()
+        ).all()
     
     def perform_create(self, serializer):
         """Set the order and validate collaborator assignment"""
@@ -1219,7 +1220,7 @@ class CollaboratorLivrableRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDe
             order__collaborator__user=self.request.user
         ).select_related(
             'order__client__user', 'order__service', 'order__status', 'order__collaborator__user'
-        ).prefetch_related('reviews').all()
+        ).all()
     
     def perform_update(self, serializer):
         """Validate that the collaborator can update this livrable"""
@@ -1247,7 +1248,7 @@ class AdminLivrableListAPIView(generics.ListAPIView):
             order__status__name='Completed'
         ).select_related(
             'order__client__user', 'order__service', 'order__status', 'order__collaborator__user'
-        ).prefetch_related('reviews').all()
+        ).all()
 
 
 class AdminLivrableRetrieveAPIView(generics.RetrieveAPIView):
@@ -1265,7 +1266,7 @@ class AdminLivrableRetrieveAPIView(generics.RetrieveAPIView):
             order__status__name='Completed'
         ).select_related(
             'order__client__user', 'order__service', 'order__status', 'order__collaborator__user'
-        ).prefetch_related('reviews').all()
+        ).all()
 
 
 class AdminLivrableReviewAPIView(generics.UpdateAPIView):
@@ -1283,7 +1284,7 @@ class AdminLivrableReviewAPIView(generics.UpdateAPIView):
             order__status__name='Completed'
         ).select_related(
             'order__client__user', 'order__service', 'order__status', 'order__collaborator__user'
-        ).prefetch_related('reviews').all()
+        ).all()
     
     def perform_update(self, serializer):
         """Update the livrable review status"""
@@ -1314,7 +1315,7 @@ class ClientLivrableListAPIView(generics.ListAPIView):
             is_reviewed_by_admin=True
         ).select_related(
             'order__client__user', 'order__service', 'order__status', 'order__collaborator__user'
-        ).prefetch_related('reviews').all()
+        ).all()
 
 
 class ClientLivrableAcceptRejectAPIView(generics.UpdateAPIView):
@@ -1334,7 +1335,7 @@ class ClientLivrableAcceptRejectAPIView(generics.UpdateAPIView):
             is_reviewed_by_admin=True
         ).select_related(
             'order__client__user', 'order__service', 'order__status', 'order__collaborator__user'
-        ).prefetch_related('reviews').all()
+        ).all()
     
     def perform_update(self, serializer):
         """Update the livrable acceptance status"""
@@ -1346,3 +1347,79 @@ class ClientLivrableAcceptRejectAPIView(generics.UpdateAPIView):
             pass
         
         serializer.save()
+
+
+# ==================== CLIENT REVIEW ENDPOINTS ====================
+
+class ClientReviewListCreateAPIView(generics.ListCreateAPIView):
+    """
+    GET /api/client/reviews/
+    POST /api/client/reviews/
+    
+    List and create reviews for the authenticated client
+    """
+    permission_classes = [IsClientUser]
+    
+    def get_serializer_class(self):
+        if self.request.method == 'GET':
+            return ReviewSerializer
+        return ReviewCreateUpdateSerializer
+    
+    def get_queryset(self):
+        """Return reviews for the authenticated client"""
+        return Review.objects.filter(
+            client__user=self.request.user
+        ).select_related(
+            'order__service', 'order__client__user', 'order__status'
+        ).all()
+    
+    def perform_create(self, serializer):
+        """Set the client from the request"""
+        serializer.save(client=self.request.user.client_profile)
+
+
+class ClientReviewRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    GET /api/client/reviews/{id}/
+    PUT /api/client/reviews/{id}/
+    PATCH /api/client/reviews/{id}/
+    DELETE /api/client/reviews/{id}/
+    
+    Retrieve, update, or delete a specific review (client only)
+    """
+    permission_classes = [IsClientUser]
+    
+    def get_serializer_class(self):
+        if self.request.method == 'GET':
+            return ReviewSerializer
+        return ReviewCreateUpdateSerializer
+    
+    def get_queryset(self):
+        """Return reviews for the authenticated client"""
+        return Review.objects.filter(
+            client__user=self.request.user
+        ).select_related(
+            'order__service', 'order__client__user', 'order__status'
+        ).all()
+    
+    def perform_update(self, serializer):
+        """Validate that the review can be updated"""
+        review = self.get_object()
+        
+        # Check if review can be updated (within 24 hours)
+        if not review.can_be_updated():
+            raise serializers.ValidationError(
+                'You can only update your review within 24 hours of creating it.'
+            )
+        
+        serializer.save()
+    
+    def perform_destroy(self, instance):
+        """Validate that the review can be deleted"""
+        # Check if review can be updated (within 24 hours)
+        if not instance.can_be_updated():
+            raise serializers.ValidationError(
+                'You can only delete your review within 24 hours of creating it.'
+            )
+        
+        instance.delete()
