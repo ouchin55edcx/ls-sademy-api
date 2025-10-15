@@ -5,7 +5,7 @@ Place this file in: core/serializers.py
 
 from rest_framework import serializers
 from django.contrib.auth import get_user_model, authenticate
-from core.models import Service, Review, Livrable, Order, Client, Template, Collaborator, Admin
+from core.models import Service, Review, Livrable, Order, Client, Template, Collaborator, Admin, Status
 
 User = get_user_model()
 
@@ -491,3 +491,246 @@ class ServiceToggleActiveSerializer(serializers.ModelSerializer):
     class Meta:
         model = Service
         fields = ['is_active']
+
+
+# Order CRUD Serializers for Admin
+
+class StatusSerializer(serializers.ModelSerializer):
+    """
+    Simple status serializer
+    """
+    class Meta:
+        model = Status
+        fields = ['id', 'name']
+
+
+class CollaboratorSerializer(serializers.ModelSerializer):
+    """
+    Simple collaborator serializer
+    """
+    username = serializers.CharField(source='user.username', read_only=True)
+    full_name = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Collaborator
+        fields = ['id', 'username', 'full_name', 'is_active']
+    
+    def get_full_name(self, obj):
+        return obj.user.get_full_name() or obj.user.username
+
+
+class OrderListSerializer(serializers.ModelSerializer):
+    """
+    Order list serializer for admin (with all details)
+    """
+    client_name = serializers.SerializerMethodField()
+    client_email = serializers.CharField(source='client.user.email', read_only=True)
+    client_phone = serializers.CharField(source='client.user.phone', read_only=True)
+    service_name = serializers.CharField(source='service.name', read_only=True)
+    status_name = serializers.CharField(source='status.name', read_only=True)
+    collaborator_name = serializers.SerializerMethodField()
+    remaining_payment = serializers.ReadOnlyField()
+    is_fully_paid = serializers.ReadOnlyField()
+    
+    class Meta:
+        model = Order
+        fields = [
+            'id',
+            'client_name',
+            'client_email', 
+            'client_phone',
+            'service_name',
+            'status_name',
+            'collaborator_name',
+            'date',
+            'deadline_date',
+            'total_price',
+            'advance_payment',
+            'remaining_payment',
+            'is_fully_paid',
+            'discount',
+            'quotation',
+            'lecture',
+            'comment'
+        ]
+    
+    def get_client_name(self, obj):
+        return obj.client.user.get_full_name() or obj.client.user.username
+    
+    def get_collaborator_name(self, obj):
+        if obj.collaborator:
+            return obj.collaborator.user.get_full_name() or obj.collaborator.user.username
+        return "Unassigned"
+
+
+class OrderCreateUpdateSerializer(serializers.ModelSerializer):
+    """
+    Order create/update serializer for admin
+    """
+    class Meta:
+        model = Order
+        fields = [
+            'client',
+            'service', 
+            'status',
+            'collaborator',
+            'deadline_date',
+            'total_price',
+            'advance_payment',
+            'discount',
+            'quotation',
+            'lecture',
+            'comment'
+        ]
+    
+    def validate_client(self, value):
+        """Validate that client exists"""
+        if not value:
+            raise serializers.ValidationError('Client is required.')
+        return value
+    
+    def validate_service(self, value):
+        """Validate that service exists and is active"""
+        if not value:
+            raise serializers.ValidationError('Service is required.')
+        if not value.is_active:
+            raise serializers.ValidationError('Cannot create order for inactive service.')
+        return value
+    
+    def validate_status(self, value):
+        """Validate that status exists"""
+        if not value:
+            raise serializers.ValidationError('Status is required.')
+        return value
+    
+    def validate_collaborator(self, value):
+        """Validate that collaborator is active (if provided)"""
+        if value and not value.is_active:
+            raise serializers.ValidationError('Cannot assign order to inactive collaborator.')
+        return value
+    
+    def validate_total_price(self, value):
+        """Validate total price"""
+        if value <= 0:
+            raise serializers.ValidationError('Total price must be greater than 0.')
+        return value
+    
+    def validate_advance_payment(self, value):
+        """Validate advance payment"""
+        if value < 0:
+            raise serializers.ValidationError('Advance payment cannot be negative.')
+        return value
+    
+    def validate_discount(self, value):
+        """Validate discount"""
+        if value < 0:
+            raise serializers.ValidationError('Discount cannot be negative.')
+        return value
+    
+    def validate(self, data):
+        """Cross-field validation"""
+        advance_payment = data.get('advance_payment', 0)
+        total_price = data.get('total_price')
+        
+        if advance_payment > total_price:
+            raise serializers.ValidationError({
+                'advance_payment': 'Advance payment cannot be greater than total price.'
+            })
+        
+        return data
+
+
+class OrderDetailSerializer(serializers.ModelSerializer):
+    """
+    Order detail serializer with related data
+    """
+    client_name = serializers.SerializerMethodField()
+    client_email = serializers.CharField(source='client.user.email', read_only=True)
+    client_phone = serializers.CharField(source='client.user.phone', read_only=True)
+    service_name = serializers.CharField(source='service.name', read_only=True)
+    status_name = serializers.CharField(source='status.name', read_only=True)
+    collaborator_name = serializers.SerializerMethodField()
+    remaining_payment = serializers.ReadOnlyField()
+    is_fully_paid = serializers.ReadOnlyField()
+    livrables = LivrableSerializer(many=True, read_only=True)
+    
+    class Meta:
+        model = Order
+        fields = [
+            'id',
+            'client',
+            'client_name',
+            'client_email',
+            'client_phone',
+            'service',
+            'service_name',
+            'status',
+            'status_name',
+            'collaborator',
+            'collaborator_name',
+            'date',
+            'deadline_date',
+            'total_price',
+            'advance_payment',
+            'remaining_payment',
+            'is_fully_paid',
+            'discount',
+            'quotation',
+            'lecture',
+            'comment',
+            'livrables'
+        ]
+    
+    def get_client_name(self, obj):
+        return obj.client.user.get_full_name() or obj.client.user.username
+    
+    def get_collaborator_name(self, obj):
+        if obj.collaborator:
+            return obj.collaborator.user.get_full_name() or obj.collaborator.user.username
+        return "Unassigned"
+
+
+class OrderStatusUpdateSerializer(serializers.ModelSerializer):
+    """
+    Serializer for updating order status (admin and collaborator)
+    """
+    class Meta:
+        model = Order
+        fields = ['status']
+    
+    def validate_status(self, value):
+        """Validate that status exists"""
+        if not value:
+            raise serializers.ValidationError('Status is required.')
+        return value
+
+
+class OrderCollaboratorAssignSerializer(serializers.ModelSerializer):
+    """
+    Serializer for assigning collaborator to order (admin only)
+    """
+    class Meta:
+        model = Order
+        fields = ['collaborator']
+    
+    def validate_collaborator(self, value):
+        """Validate that collaborator is active"""
+        if value and not value.is_active:
+            raise serializers.ValidationError('Cannot assign order to inactive collaborator.')
+        return value
+
+
+class ActiveCollaboratorListSerializer(serializers.ModelSerializer):
+    """
+    Serializer for listing active collaborators (for assignment dropdown)
+    """
+    username = serializers.CharField(source='user.username', read_only=True)
+    full_name = serializers.SerializerMethodField()
+    email = serializers.CharField(source='user.email', read_only=True)
+    
+    class Meta:
+        model = Collaborator
+        fields = ['user', 'username', 'full_name', 'email']
+    
+    def get_full_name(self, obj):
+        return obj.user.get_full_name() or obj.user.username

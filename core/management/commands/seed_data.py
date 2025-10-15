@@ -108,42 +108,36 @@ class Command(BaseCommand):
         service_data = [
             {
                 'name': 'Web Development',
-                'price': Decimal('5000.00'),
                 'description': 'Professional web development services including responsive design, e-commerce solutions, and custom web applications.',
                 'is_active': True,
                 'tool_name': 'React, Django, PostgreSQL'
             },
             {
                 'name': 'Mobile App Development',
-                'price': Decimal('8000.00'),
                 'description': 'Native and cross-platform mobile application development for iOS and Android.',
                 'is_active': True,
                 'tool_name': 'React Native, Flutter, Swift'
             },
             {
                 'name': 'Digital Marketing',
-                'price': Decimal('3000.00'),
                 'description': 'Complete digital marketing services including SEO, social media management, and content marketing.',
                 'is_active': True,
                 'tool_name': 'Google Analytics, SEMrush, Hootsuite'
             },
             {
                 'name': 'Graphic Design',
-                'price': Decimal('2000.00'),
                 'description': 'Professional graphic design services for logos, branding, and marketing materials.',
                 'is_active': True,
                 'tool_name': 'Adobe Photoshop, Illustrator, Figma'
             },
             {
                 'name': 'Video Production',
-                'price': Decimal('4500.00'),
                 'description': 'High-quality video production services for commercials, corporate videos, and promotional content.',
                 'is_active': True,
                 'tool_name': 'Adobe Premiere, After Effects, DaVinci Resolve'
             },
             {
                 'name': 'Legacy Service',
-                'price': Decimal('1500.00'),
                 'description': 'This service is no longer active.',
                 'is_active': False,
                 'tool_name': ''
@@ -166,21 +160,21 @@ class Command(BaseCommand):
                 'title': 'E-commerce Website Template',
                 'description': 'Modern e-commerce template with shopping cart, payment integration, and product management.',
                 'file': '/templates/web/ecommerce-template.zip',
-                'demo': 'https://demo.sademiy.com/ecommerce'
+                'demo_video': '/templates/demos/ecommerce-demo.mp4'
             },
             {
                 'service': services[0],
                 'title': 'Portfolio Website Template',
                 'description': 'Clean and professional portfolio template for showcasing your work.',
                 'file': '/templates/web/portfolio-template.zip',
-                'demo': 'https://demo.sademiy.com/portfolio'
+                'demo_video': '/templates/demos/portfolio-demo.mp4'
             },
             {
                 'service': services[0],
                 'title': 'Corporate Website Template',
                 'description': 'Professional corporate website template with CMS integration.',
                 'file': '/templates/web/corporate-template.zip',
-                'demo': 'https://demo.sademiy.com/corporate'
+                'demo_video': '/templates/demos/corporate-demo.mp4'
             },
             # Mobile App Templates
             {
@@ -188,14 +182,14 @@ class Command(BaseCommand):
                 'title': 'Food Delivery App Template',
                 'description': 'Complete food delivery app template with order tracking and payments.',
                 'file': '/templates/mobile/food-delivery-app.zip',
-                'demo': 'https://demo.sademiy.com/food-app'
+                'demo_video': '/templates/demos/food-app-demo.mp4'
             },
             {
                 'service': services[1],
                 'title': 'Fitness Tracker App Template',
                 'description': 'Health and fitness tracking app with workout plans and progress monitoring.',
                 'file': '/templates/mobile/fitness-app.zip',
-                'demo': 'https://demo.sademiy.com/fitness-app'
+                'demo_video': '/templates/demos/fitness-app-demo.mp4'
             },
             # Digital Marketing Templates
             {
@@ -203,14 +197,14 @@ class Command(BaseCommand):
                 'title': 'Social Media Campaign Template',
                 'description': 'Ready-to-use social media campaign templates for various platforms.',
                 'file': '/templates/marketing/social-campaign.zip',
-                'demo': 'https://demo.sademiy.com/social-campaign'
+                'demo_video': '/templates/demos/social-campaign-demo.mp4'
             },
             {
                 'service': services[2],
                 'title': 'Email Marketing Template Pack',
                 'description': 'Professional email marketing templates with high conversion rates.',
                 'file': '/templates/marketing/email-templates.zip',
-                'demo': 'https://demo.sademiy.com/email-templates'
+                'demo_video': '/templates/demos/email-templates-demo.mp4'
             },
             # Graphic Design Templates
             {
@@ -218,14 +212,14 @@ class Command(BaseCommand):
                 'title': 'Brand Identity Kit',
                 'description': 'Complete brand identity kit with logo, business cards, and letterhead templates.',
                 'file': '/templates/design/brand-identity.zip',
-                'demo': 'https://demo.sademiy.com/brand-identity'
+                'demo_video': '/templates/demos/brand-identity-demo.mp4'
             },
             {
                 'service': services[3],
                 'title': 'Marketing Materials Pack',
                 'description': 'Professional marketing materials including flyers, brochures, and posters.',
                 'file': '/templates/design/marketing-pack.zip',
-                'demo': 'https://demo.sademiy.com/marketing-materials'
+                'demo_video': '/templates/demos/marketing-materials-demo.mp4'
             },
             # Video Production Templates
             {
@@ -233,14 +227,14 @@ class Command(BaseCommand):
                 'title': 'Corporate Video Template',
                 'description': 'Professional corporate video template with motion graphics.',
                 'file': '/templates/video/corporate-video.zip',
-                'demo': 'https://demo.sademiy.com/corporate-video'
+                'demo_video': '/templates/demos/corporate-video-demo.mp4'
             },
             {
                 'service': services[4],
                 'title': 'Product Promotion Video Template',
                 'description': 'Engaging product promotion video template with animations.',
                 'file': '/templates/video/product-promo.zip',
-                'demo': 'https://demo.sademiy.com/product-promo'
+                'demo_video': '/templates/demos/product-promo-demo.mp4'
             },
         ]
         
@@ -252,6 +246,9 @@ class Command(BaseCommand):
         
         self.stdout.write(f'  ✓ Created {len(templates)} templates total')
 
+        # Get collaborators for assignment
+        collaborators = list(Collaborator.objects.filter(is_active=True))
+        
         # Create Orders
         self.stdout.write('Creating orders...')
         orders = []
@@ -261,6 +258,7 @@ class Command(BaseCommand):
             client=clients[0],
             service=services[0],  # Web Development
             status=status_objects['Completed'],
+            collaborator=collaborators[0] if collaborators else None,  # Assign to first collaborator
             deadline_date=timezone.now() + timedelta(days=30),
             total_price=Decimal('5000.00'),
             advance_payment=Decimal('5000.00'),
@@ -275,6 +273,7 @@ class Command(BaseCommand):
             client=clients[1],
             service=services[1],  # Mobile App
             status=status_objects['In Progress'],
+            collaborator=collaborators[1] if len(collaborators) > 1 else collaborators[0] if collaborators else None,  # Assign to second collaborator
             deadline_date=timezone.now() + timedelta(days=45),
             total_price=Decimal('8000.00'),
             advance_payment=Decimal('4000.00'),
@@ -289,6 +288,7 @@ class Command(BaseCommand):
             client=clients[2],
             service=services[2],  # Digital Marketing
             status=status_objects['Completed'],
+            collaborator=collaborators[0] if collaborators else None,  # Assign to first collaborator
             deadline_date=timezone.now() + timedelta(days=15),
             total_price=Decimal('3000.00'),
             advance_payment=Decimal('3000.00'),
@@ -298,11 +298,12 @@ class Command(BaseCommand):
         )
         orders.append(order3)
         
-        # Order 4: Pending
+        # Order 4: Pending (Unassigned)
         order4 = Order.objects.create(
             client=clients[3],
             service=services[3],  # Graphic Design
             status=status_objects['Pending'],
+            collaborator=None,  # Unassigned order
             deadline_date=timezone.now() + timedelta(days=20),
             total_price=Decimal('2000.00'),
             advance_payment=Decimal('500.00'),
@@ -316,6 +317,7 @@ class Command(BaseCommand):
             client=clients[0],
             service=services[4],  # Video Production
             status=status_objects['Completed'],
+            collaborator=collaborators[1] if len(collaborators) > 1 else collaborators[0] if collaborators else None,  # Assign to second collaborator
             deadline_date=timezone.now() + timedelta(days=25),
             total_price=Decimal('4500.00'),
             advance_payment=Decimal('4500.00'),

@@ -161,7 +161,7 @@ class Status(models.Model):
 
 class Order(models.Model):
     """
-    Order model with relationships to Client, Service, and Status
+    Order model with relationships to Client, Service, Status, and Collaborator
     """
     client = models.ForeignKey(
         Client,
@@ -176,6 +176,13 @@ class Order(models.Model):
     status = models.ForeignKey(
         Status,
         on_delete=models.PROTECT,
+        related_name='orders'
+    )
+    collaborator = models.ForeignKey(
+        Collaborator,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
         related_name='orders'
     )
     
@@ -212,7 +219,8 @@ class Order(models.Model):
         ordering = ['-date']
 
     def __str__(self):
-        return f"Order #{self.id} - {self.client.user.username} - {self.status.name}"
+        collaborator_name = self.collaborator.user.username if self.collaborator else "Unassigned"
+        return f"Order #{self.id} - {self.client.user.username} - {self.status.name} - {collaborator_name}"
 
     @property
     def remaining_payment(self):

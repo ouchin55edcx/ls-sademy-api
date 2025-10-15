@@ -9,13 +9,16 @@ from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.authtoken.models import Token
 from django.contrib.auth import login, get_user_model
-from core.models import Service, Review, Template
+from core.models import Service, Review, Template, Order, Status, Collaborator
 from core.serializers import (
     LoginSerializer, UserSerializer, ServiceListSerializer,
     ServiceDetailSerializer, AllReviewsSerializer,
     UserListSerializer, CreateCollaboratorSerializer, DeactivateUserSerializer,
     ServiceCreateUpdateSerializer, ServiceAdminListSerializer, ServiceToggleActiveSerializer,
-    TemplateSerializer, TemplateCreateUpdateSerializer
+    TemplateSerializer, TemplateCreateUpdateSerializer,
+    OrderListSerializer, OrderCreateUpdateSerializer, OrderDetailSerializer,
+    OrderStatusUpdateSerializer, OrderCollaboratorAssignSerializer,
+    StatusSerializer, ActiveCollaboratorListSerializer
 )
 from core.permissions import IsAdminUser
 
@@ -784,3 +787,374 @@ class TemplateRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView
             {'message': 'Template deleted successfully'},
             status=status.HTTP_200_OK
         )
+
+
+# Order Management Views
+
+class OrderListCreateAPIView(generics.ListCreateAPIView):
+    """
+    GET /api/admin/orders/
+    POST /api/admin/orders/
+    
+    List all orders or create a new order (admin only)
+    
+    GET Response:
+    [
+        {
+            "id": 1,
+            "client_name": "Youssef Tazi",
+            "client_email": "client1@example.com",
+            "client_phone": "+212600000004",
+            "service_name": "Web Development",
+            "status_name": "In Progress",
+            "collaborator_name": "Ahmed Benali",
+            "date": "2024-01-15T10:30:00Z",
+            "deadline_date": "2024-02-15T10:30:00Z",
+            "total_price": "1500.00",
+            "advance_payment": "500.00",
+            "remaining_payment": "1000.00",
+            "is_fully_paid": false,
+            "discount": "0.00",
+            "quotation": "Custom website development...",
+            "lecture": "Focus on responsive design...",
+            "comment": "Client prefers modern design"
+        }
+    ]
+    
+    POST Request body:
+    {
+        "client": 1,
+        "service": 1,
+        "status": 2,
+        "collaborator": 1,
+        "deadline_date": "2024-02-15T10:30:00Z",
+        "total_price": "1500.00",
+        "advance_payment": "500.00",
+        "discount": "0.00",
+        "quotation": "Custom website development...",
+        "lecture": "Focus on responsive design...",
+        "comment": "Client prefers modern design"
+    }
+    """
+    permission_classes = [IsAuthenticated, IsAdminUser]
+    queryset = Order.objects.select_related(
+        'client__user', 'service', 'status', 'collaborator__user'
+    ).all()
+    
+    def get_serializer_class(self):
+        if self.request.method == 'GET':
+            return OrderListSerializer
+        return OrderCreateUpdateSerializer
+
+
+class OrderRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    GET /api/admin/orders/{id}/
+    PUT /api/admin/orders/{id}/
+    PATCH /api/admin/orders/{id}/
+    DELETE /api/admin/orders/{id}/
+    
+    Retrieve, update, or delete an order (admin only)
+    
+    GET Response:
+    {
+        "id": 1,
+        "client": 1,
+        "client_name": "Youssef Tazi",
+        "client_email": "client1@example.com",
+        "client_phone": "+212600000004",
+        "service": 1,
+        "service_name": "Web Development",
+        "status": 2,
+        "status_name": "In Progress",
+        "collaborator": 1,
+        "collaborator_name": "Ahmed Benali",
+        "date": "2024-01-15T10:30:00Z",
+        "deadline_date": "2024-02-15T10:30:00Z",
+        "total_price": "1500.00",
+        "advance_payment": "500.00",
+        "remaining_payment": "1000.00",
+        "is_fully_paid": false,
+        "discount": "0.00",
+        "quotation": "Custom website development...",
+        "lecture": "Focus on responsive design...",
+        "comment": "Client prefers modern design",
+        "livrables": []
+    }
+    """
+    permission_classes = [IsAuthenticated, IsAdminUser]
+    queryset = Order.objects.select_related(
+        'client__user', 'service', 'status', 'collaborator__user'
+    ).prefetch_related('livrables').all()
+    
+    def get_serializer_class(self):
+        if self.request.method == 'GET':
+            return OrderDetailSerializer
+        return OrderCreateUpdateSerializer
+    
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        self.perform_destroy(instance)
+        return Response(
+            {'message': 'Order deleted successfully'},
+            status=status.HTTP_200_OK
+        )
+
+
+class OrderStatusUpdateAPIView(generics.UpdateAPIView):
+    """
+    PATCH /api/admin/orders/{id}/status/
+    PATCH /api/collaborator/orders/{id}/status/
+    
+    Update order status (admin and collaborator)
+    
+    Request body:
+    {
+        "status": 3
+    }
+    
+    Response:
+    {
+        "id": 1,
+        "status": 3,
+        "status_name": "Completed",
+        "message": "Order status updated successfully"
+    }
+    """
+    permission_classes = [IsAuthenticated]
+    serializer_class = OrderStatusUpdateSerializer
+    queryset = Order.objects.select_related('status').all()
+    
+    def get_permissions(self):
+        """
+        Allow both admin and collaborator to update status
+        """
+        if hasattr(self.request.user, 'admin_profile'):
+            return [IsAuthenticated()]
+        elif hasattr(self.request.user, 'collaborator_profile'):
+            return [IsAuthenticated()]
+        else:
+            return [IsAuthenticated()]
+    
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        
+        # Check if collaborator can update this order
+        if hasattr(request.user, 'collaborator_profile'):
+            if not instance.collaborator or instance.collaborator.user != request.user:
+                return Response(
+                    {'error': 'You can only update status of orders assigned to you.'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+        
+        serializer = self.get_serializer(instance, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        
+        return Response({
+            'id': instance.id,
+            'status': instance.status.id,
+            'status_name': instance.status.name,
+            'message': 'Order status updated successfully'
+        })
+
+
+class OrderCollaboratorAssignAPIView(generics.UpdateAPIView):
+    """
+    PATCH /api/admin/orders/{id}/assign-collaborator/
+    
+    Assign collaborator to order (admin only)
+    
+    Request body:
+    {
+        "collaborator": 1
+    }
+    
+    Response:
+    {
+        "id": 1,
+        "collaborator": 1,
+        "collaborator_name": "Ahmed Benali",
+        "message": "Collaborator assigned successfully"
+    }
+    """
+    permission_classes = [IsAuthenticated, IsAdminUser]
+    serializer_class = OrderCollaboratorAssignSerializer
+    queryset = Order.objects.select_related('collaborator__user').all()
+    
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        
+        collaborator_name = "Unassigned"
+        if instance.collaborator:
+            collaborator_name = instance.collaborator.user.get_full_name() or instance.collaborator.user.username
+        
+        return Response({
+            'id': instance.id,
+            'collaborator': instance.collaborator.user.id if instance.collaborator else None,
+            'collaborator_name': collaborator_name,
+            'message': 'Collaborator assigned successfully'
+        })
+
+
+class StatusListAPIView(generics.ListAPIView):
+    """
+    GET /api/admin/statuses/
+    GET /api/collaborator/statuses/
+    
+    List all available statuses (admin and collaborator)
+    
+    Response:
+    [
+        {
+            "id": 1,
+            "name": "Pending"
+        },
+        {
+            "id": 2,
+            "name": "In Progress"
+        }
+    ]
+    """
+    permission_classes = [IsAuthenticated]
+    serializer_class = StatusSerializer
+    queryset = Status.objects.all()
+    
+    def get_permissions(self):
+        """
+        Allow both admin and collaborator to access statuses
+        """
+        if hasattr(self.request.user, 'admin_profile'):
+            return [IsAuthenticated()]
+        elif hasattr(self.request.user, 'collaborator_profile'):
+            return [IsAuthenticated()]
+        else:
+            return [IsAdminUser()]
+
+
+class ActiveCollaboratorListAPIView(generics.ListAPIView):
+    """
+    GET /api/admin/active-collaborators/
+    
+    List all active collaborators for assignment (admin only)
+    
+    Response:
+    [
+        {
+            "id": 1,
+            "username": "collab1",
+            "full_name": "Ahmed Benali",
+            "email": "ahmed@example.com"
+        }
+    ]
+    """
+    permission_classes = [IsAuthenticated, IsAdminUser]
+    serializer_class = ActiveCollaboratorListSerializer
+    queryset = Collaborator.objects.filter(is_active=True).select_related('user')
+
+
+class CollaboratorOrderListAPIView(generics.ListAPIView):
+    """
+    GET /api/collaborator/orders/
+    
+    List orders assigned to the authenticated collaborator
+    
+    Response:
+    [
+        {
+            "id": 1,
+            "client_name": "Youssef Tazi",
+            "service_name": "Web Development",
+            "status_name": "In Progress",
+            "date": "2024-01-15T10:30:00Z",
+            "deadline_date": "2024-02-15T10:30:00Z",
+            "total_price": "1500.00",
+            "advance_payment": "500.00",
+            "remaining_payment": "1000.00",
+            "is_fully_paid": false
+        }
+    ]
+    """
+    permission_classes = [IsAuthenticated]
+    serializer_class = OrderListSerializer
+    
+    def get_queryset(self):
+        """Return orders assigned to the authenticated collaborator"""
+        if hasattr(self.request.user, 'collaborator_profile'):
+            return Order.objects.filter(
+                collaborator__user=self.request.user
+            ).select_related(
+                'client__user', 'service', 'status', 'collaborator__user'
+            ).all()
+        return Order.objects.none()
+    
+    def get_permissions(self):
+        """
+        Allow only collaborators to access their orders
+        """
+        if hasattr(self.request.user, 'collaborator_profile'):
+            return [IsAuthenticated()]
+        else:
+            return [IsAdminUser()]
+
+
+class ClientOrderListAPIView(generics.ListAPIView):
+    """
+    GET /api/client/orders/
+    
+    List orders for the authenticated client
+    
+    Response:
+    [
+        {
+            "id": 1,
+            "client_name": "Youssef Tazi",
+            "service_name": "Web Development",
+            "status_name": "In Progress",
+            "collaborator_name": "Ahmed Bennani",
+            "date": "2024-01-15T10:30:00Z",
+            "deadline_date": "2024-02-15T10:30:00Z",
+            "total_price": "1500.00",
+            "advance_payment": "500.00",
+            "remaining_payment": "1000.00",
+            "is_fully_paid": false,
+            "discount": "0.00",
+            "quotation": "Custom website development...",
+            "lecture": "Focus on responsive design...",
+            "comment": "Client prefers modern design",
+            "livrables": [
+                {
+                    "id": 1,
+                    "name": "Website Mockup",
+                    "description": "Initial design mockup",
+                    "is_accepted": false,
+                    "reviews": []
+                }
+            ]
+        }
+    ]
+    """
+    permission_classes = [IsAuthenticated]
+    serializer_class = OrderDetailSerializer
+    
+    def get_queryset(self):
+        """Return orders for the authenticated client"""
+        if hasattr(self.request.user, 'client_profile'):
+            return Order.objects.filter(
+                client__user=self.request.user
+            ).select_related(
+                'client__user', 'service', 'status', 'collaborator__user'
+            ).prefetch_related('livrables').all()
+        return Order.objects.none()
+    
+    def get_permissions(self):
+        """
+        Allow only clients to access their orders
+        """
+        if hasattr(self.request.user, 'client_profile'):
+            return [IsAuthenticated()]
+        else:
+            return [IsAdminUser()]
