@@ -23,6 +23,7 @@ from core.views import (
     ActiveCollaboratorListAPIView,
     CollaboratorOrderListAPIView,
     ClientOrderListAPIView,
+    ClientStatisticsAPIView,
     CollaboratorLivrableListCreateAPIView,
     CollaboratorLivrableRetrieveUpdateDestroyAPIView,
     AdminLivrableListAPIView,
@@ -79,6 +80,7 @@ urlpatterns = [
     
     # Client - Order Management (Client Only)
     path('client/orders/', ClientOrderListAPIView.as_view(), name='client-orders-list'),
+    path('client/statistics/', ClientStatisticsAPIView.as_view(), name='client-statistics'),
     
     # Collaborator - Livrable Management (Collaborator Only)
     path('collaborator/livrables/', CollaboratorLivrableListCreateAPIView.as_view(), name='collaborator-livrables-list-create'),

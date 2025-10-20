@@ -9,6 +9,7 @@ from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.authtoken.models import Token
 from django.contrib.auth import login, get_user_model
+from django.db import models
 from core.models import Service, Review, Template, Order, Status, Collaborator, Livrable
 from core.serializers import (
     LoginSerializer, UserSerializer, ServiceListSerializer,
@@ -1161,6 +1162,116 @@ class ClientOrderListAPIView(generics.ListAPIView):
             return [IsAuthenticated()]
         else:
             return [IsAdminUser()]
+
+
+class ClientStatisticsAPIView(APIView):
+    """
+    GET /api/client/statistics/
+    
+    Get global statistics for the authenticated client
+    
+    Response:
+    {
+        "total_orders": 5,
+        "completed_orders": 3,
+        "in_progress_orders": 1,
+        "pending_orders": 1,
+        "total_spent": "7500.00",
+        "average_order_value": "1500.00",
+        "total_livrables": 8,
+        "accepted_livrables": 6,
+        "pending_livrables": 2,
+        "total_reviews_given": 3,
+        "average_rating_given": 4.7,
+        "services_used": [
+            {
+                "service_name": "Web Development",
+                "orders_count": 2,
+                "total_spent": "3000.00"
+            }
+        ],
+        "recent_activity": [
+            {
+                "type": "order_created",
+                "description": "New order for Web Development",
+                "date": "2024-01-15T10:30:00Z"
+            }
+        ]
+    }
+    """
+    permission_classes = [IsClientUser]
+    
+    def get(self, request):
+        """Get statistics for the authenticated client"""
+        if not hasattr(request.user, 'client_profile'):
+            return Response({'error': 'Client profile not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        client = request.user.client_profile
+        
+        # Get all orders for this client
+        orders = Order.objects.filter(client=client)
+        total_orders = orders.count()
+        
+        # Order status statistics
+        completed_orders = orders.filter(status__name__icontains='completed').count()
+        in_progress_orders = orders.filter(status__name__icontains='progress').count()
+        pending_orders = orders.filter(status__name__icontains='pending').count()
+        
+        # Financial statistics
+        total_spent = orders.aggregate(total=models.Sum('total_price'))['total'] or 0
+        average_order_value = round(float(total_spent / total_orders), 2) if total_orders > 0 else 0
+        
+        # Livrables statistics
+        livrables = Livrable.objects.filter(order__client=client)
+        total_livrables = livrables.count()
+        accepted_livrables = livrables.filter(is_accepted=True).count()
+        pending_livrables = total_livrables - accepted_livrables
+        
+        # Reviews statistics
+        reviews = Review.objects.filter(client=client)
+        total_reviews_given = reviews.count()
+        if total_reviews_given > 0:
+            total_rating = sum([review.rating for review in reviews])
+            average_rating_given = round(total_rating / total_reviews_given, 2)
+        else:
+            average_rating_given = 0
+        
+        # Services used statistics
+        services_used = []
+        for service in Service.objects.filter(orders__client=client).distinct():
+            service_orders = orders.filter(service=service)
+            service_spent = service_orders.aggregate(total=models.Sum('total_price'))['total'] or 0
+            services_used.append({
+                'service_name': service.name,
+                'orders_count': service_orders.count(),
+                'total_spent': str(service_spent)
+            })
+        
+        # Recent activity (last 5 orders)
+        recent_orders = orders.order_by('-date')[:5]
+        recent_activity = []
+        for order in recent_orders:
+            recent_activity.append({
+                'type': 'order_created',
+                'description': f"New order for {order.service.name}",
+                'date': order.date.isoformat()
+            })
+        
+        return Response({
+            'total_orders': total_orders,
+            'completed_orders': completed_orders,
+            'in_progress_orders': in_progress_orders,
+            'pending_orders': pending_orders,
+            'total_spent': str(total_spent),
+            'average_order_value': str(average_order_value),
+            'total_livrables': total_livrables,
+            'accepted_livrables': accepted_livrables,
+            'pending_livrables': pending_livrables,
+            'total_reviews_given': total_reviews_given,
+            'average_rating_given': average_rating_given,
+            'services_used': services_used,
+            'recent_activity': recent_activity
+        })
 
 
 # ==================== LIVRABLE ENDPOINTS ====================
