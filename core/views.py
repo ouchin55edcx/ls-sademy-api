@@ -1039,6 +1039,43 @@ class StatusListAPIView(generics.ListAPIView):
             return [IsAdminUser()]
 
 
+class CollaboratorStatusAPIView(generics.ListAPIView):
+    """
+    GET /api/collaborator/status/
+    
+    List only In Progress and Under Review statuses for collaborators
+    
+    Response:
+    [
+        {
+            "id": 51,
+            "name": "in_progress"
+        },
+        {
+            "id": 52,
+            "name": "under_review"
+        }
+    ]
+    """
+    permission_classes = [IsAuthenticated]
+    serializer_class = StatusSerializer
+    
+    def get_queryset(self):
+        """Return only In Progress and Under Review statuses"""
+        return Status.objects.filter(
+            name__in=['in_progress', 'under_review']
+        )
+    
+    def get_permissions(self):
+        """
+        Allow only collaborators to access these specific statuses
+        """
+        if hasattr(self.request.user, 'collaborator_profile'):
+            return [IsAuthenticated()]
+        else:
+            return [IsAdminUser()]
+
+
 class ActiveCollaboratorListAPIView(generics.ListAPIView):
     """
     GET /api/admin/active-collaborators/
@@ -1078,7 +1115,8 @@ class CollaboratorOrderListAPIView(generics.ListAPIView):
             "total_price": "1500.00",
             "advance_payment": "500.00",
             "remaining_payment": "1000.00",
-            "is_fully_paid": false
+            "is_fully_paid": false,
+            "has_livrable": true
         }
     ]
     """
@@ -1092,7 +1130,7 @@ class CollaboratorOrderListAPIView(generics.ListAPIView):
                 collaborator__user=self.request.user
             ).select_related(
                 'client__user', 'service', 'status', 'collaborator__user'
-            ).all()
+            ).prefetch_related('livrables').all()
         return Order.objects.none()
     
     def get_permissions(self):
@@ -1354,9 +1392,9 @@ class AdminLivrableListAPIView(generics.ListAPIView):
     serializer_class = LivrableListSerializer
     
     def get_queryset(self):
-        """Return all livrables with completed orders"""
+        """Return all livrables with under_review orders for admin review"""
         return Livrable.objects.filter(
-            order__status__name='Completed'
+            order__status__name='under_review'
         ).select_related(
             'order__client__user', 'order__service', 'order__status', 'order__collaborator__user'
         ).all()
@@ -1372,9 +1410,9 @@ class AdminLivrableRetrieveAPIView(generics.RetrieveAPIView):
     serializer_class = LivrableDetailSerializer
     
     def get_queryset(self):
-        """Return livrables with completed orders"""
+        """Return livrables with under_review orders for admin review"""
         return Livrable.objects.filter(
-            order__status__name='Completed'
+            order__status__name='under_review'
         ).select_related(
             'order__client__user', 'order__service', 'order__status', 'order__collaborator__user'
         ).all()
@@ -1390,9 +1428,9 @@ class AdminLivrableReviewAPIView(generics.UpdateAPIView):
     serializer_class = LivrableAdminReviewSerializer
     
     def get_queryset(self):
-        """Return livrables with completed orders"""
+        """Return livrables with under_review orders for admin review"""
         return Livrable.objects.filter(
-            order__status__name='Completed'
+            order__status__name='under_review'
         ).select_related(
             'order__client__user', 'order__service', 'order__status', 'order__collaborator__user'
         ).all()
@@ -1422,7 +1460,7 @@ class ClientLivrableListAPIView(generics.ListAPIView):
         """Return livrables for the client's completed orders that have been reviewed by admin"""
         return Livrable.objects.filter(
             order__client__user=self.request.user,
-            order__status__name='Completed',
+            order__status__name='under_review',
             is_reviewed_by_admin=True
         ).select_related(
             'order__client__user', 'order__service', 'order__status', 'order__collaborator__user'
@@ -1442,7 +1480,7 @@ class ClientLivrableAcceptRejectAPIView(generics.UpdateAPIView):
         """Return livrables for the client's completed orders that have been reviewed by admin"""
         return Livrable.objects.filter(
             order__client__user=self.request.user,
-            order__status__name='Completed',
+            order__status__name='under_review',
             is_reviewed_by_admin=True
         ).select_related(
             'order__client__user', 'order__service', 'order__status', 'order__collaborator__user'
