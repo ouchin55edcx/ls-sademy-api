@@ -23,6 +23,7 @@ from core.views import (
     CollaboratorStatusAPIView,
     ActiveCollaboratorListAPIView,
     CollaboratorOrderListAPIView,
+    CollaboratorStatisticsAPIView,
     ClientOrderListAPIView,
     ClientOrderCancelAPIView,
     ClientStatisticsAPIView,
@@ -37,7 +38,8 @@ from core.views import (
     ClientReviewListCreateAPIView,
     ClientReviewRetrieveUpdateDestroyAPIView,
     LivrableFileDownloadAPIView,
-    ProfileUpdateAPIView
+    ProfileUpdateAPIView,
+    AdminStatisticsAPIView
 )
 
 app_name = 'core'
@@ -79,12 +81,16 @@ urlpatterns = [
     path('admin/statuses/', StatusListAPIView.as_view(), name='admin-statuses-list'),
     path('admin/active-collaborators/', ActiveCollaboratorListAPIView.as_view(), name='admin-active-collaborators-list'),
     
+    # Admin - Statistics (Admin Only)
+    path('admin/statistics/', AdminStatisticsAPIView.as_view(), name='admin-statistics'),
+    
     # Collaborator - Order Management (Collaborator Only)
     path('collaborator/orders/', CollaboratorOrderListAPIView.as_view(), name='collaborator-orders-list'),
     path('collaborator/orders/<int:pk>/status/', OrderStatusUpdateAPIView.as_view(), name='collaborator-order-status-update'),
     path('collaborator/orders/<int:order_id>/status-history/', OrderStatusHistoryAPIView.as_view(), name='collaborator-order-status-history'),
     path('collaborator/statuses/', StatusListAPIView.as_view(), name='collaborator-statuses-list'),
     path('collaborator/status/', CollaboratorStatusAPIView.as_view(), name='collaborator-status'),
+    path('collaborator/statistics/', CollaboratorStatisticsAPIView.as_view(), name='collaborator-statistics'),
     
     # Client - Order Management (Client Only)
     path('client/orders/', ClientOrderListAPIView.as_view(), name='client-orders-list'),

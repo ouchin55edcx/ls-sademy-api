@@ -1462,6 +1462,119 @@ class ClientStatisticsAPIView(APIView):
         })
 
 
+class CollaboratorStatisticsAPIView(APIView):
+    """
+    GET /api/collaborator/statistics/
+    
+    Get global statistics for the authenticated collaborator
+    
+    Response:
+    {
+        "total_orders": 8,
+        "completed_orders": 5,
+        "in_progress_orders": 2,
+        "under_review_orders": 1,
+        "total_earnings": "12000.00",
+        "average_order_value": "1500.00",
+        "total_livrables": 12,
+        "accepted_livrables": 10,
+        "pending_livrables": 2,
+        "total_reviews_received": 5,
+        "average_rating_received": 4.8,
+        "services_worked_on": [
+            {
+                "service_name": "Web Development",
+                "orders_count": 3,
+                "total_earnings": "4500.00"
+            }
+        ],
+        "recent_activity": [
+            {
+                "type": "order_assigned",
+                "description": "New order assigned for Web Development",
+                "date": "2024-01-15T10:30:00Z"
+            }
+        ]
+    }
+    """
+    permission_classes = [IsCollaboratorUser]
+    
+    def get(self, request):
+        """Get statistics for the authenticated collaborator"""
+        if not hasattr(request.user, 'collaborator_profile'):
+            return Response({'error': 'Collaborator profile not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        collaborator = request.user.collaborator_profile
+        
+        # Get all orders assigned to this collaborator
+        orders = Order.objects.filter(collaborator=collaborator)
+        total_orders = orders.count()
+        
+        # Order status statistics
+        completed_orders = orders.filter(status__name__icontains='completed').count()
+        in_progress_orders = orders.filter(status__name__icontains='progress').count()
+        under_review_orders = orders.filter(status__name__icontains='review').count()
+        
+        # Financial statistics (earnings from completed orders)
+        completed_orders_queryset = orders.filter(status__name__icontains='completed')
+        total_earnings = completed_orders_queryset.aggregate(total=models.Sum('total_price'))['total'] or 0
+        average_order_value = round(float(total_earnings / completed_orders), 2) if completed_orders > 0 else 0
+        
+        # Livrables statistics
+        livrables = Livrable.objects.filter(order__collaborator=collaborator)
+        total_livrables = livrables.count()
+        accepted_livrables = livrables.filter(is_accepted=True).count()
+        pending_livrables = total_livrables - accepted_livrables
+        
+        # Reviews statistics (reviews received from clients)
+        reviews = Review.objects.filter(order__collaborator=collaborator)
+        total_reviews_received = reviews.count()
+        if total_reviews_received > 0:
+            total_rating = sum([review.rating for review in reviews])
+            average_rating_received = round(total_rating / total_reviews_received, 2)
+        else:
+            average_rating_received = 0
+        
+        # Services worked on statistics
+        services_worked_on = []
+        for service in Service.objects.filter(orders__collaborator=collaborator).distinct():
+            service_orders = orders.filter(service=service)
+            service_earnings = service_orders.filter(status__name__icontains='completed').aggregate(
+                total=models.Sum('total_price')
+            )['total'] or 0
+            services_worked_on.append({
+                'service_name': service.name,
+                'orders_count': service_orders.count(),
+                'total_earnings': str(service_earnings)
+            })
+        
+        # Recent activity (last 5 orders assigned)
+        recent_orders = orders.order_by('-date')[:5]
+        recent_activity = []
+        for order in recent_orders:
+            recent_activity.append({
+                'type': 'order_assigned',
+                'description': f"New order assigned for {order.service.name}",
+                'date': order.date.isoformat()
+            })
+        
+        return Response({
+            'total_orders': total_orders,
+            'completed_orders': completed_orders,
+            'in_progress_orders': in_progress_orders,
+            'under_review_orders': under_review_orders,
+            'total_earnings': str(total_earnings),
+            'average_order_value': str(average_order_value),
+            'total_livrables': total_livrables,
+            'accepted_livrables': accepted_livrables,
+            'pending_livrables': pending_livrables,
+            'total_reviews_received': total_reviews_received,
+            'average_rating_received': average_rating_received,
+            'services_worked_on': services_worked_on,
+            'recent_activity': recent_activity
+        })
+
+
 # ==================== LIVRABLE ENDPOINTS ====================
 
 class CollaboratorLivrableListCreateAPIView(generics.ListCreateAPIView):
@@ -1844,3 +1957,326 @@ class ProfileUpdateAPIView(generics.UpdateAPIView):
             'message': 'Profile updated successfully',
             'user': UserSerializer(updated_user).data
         }, status=status.HTTP_200_OK)
+
+
+class AdminStatisticsAPIView(APIView):
+    """
+    GET /api/admin/statistics/
+    
+    Get comprehensive statistics for admin dashboard (admin only)
+    
+    Response:
+    {
+        "overview": {
+            "total_users": 150,
+            "total_clients": 120,
+            "total_collaborators": 25,
+            "total_orders": 300,
+            "total_services": 15,
+            "total_reviews": 85,
+            "total_revenue": "125000.00"
+        },
+        "orders": {
+            "total_orders": 300,
+            "completed_orders": 180,
+            "in_progress_orders": 45,
+            "pending_orders": 30,
+            "cancelled_orders": 15,
+            "under_review_orders": 30,
+            "average_order_value": "1250.00",
+            "total_revenue": "125000.00",
+            "pending_payments": "15000.00"
+        },
+        "users": {
+            "new_users_this_month": 25,
+            "active_clients": 95,
+            "active_collaborators": 20,
+            "inactive_collaborators": 5
+        },
+        "services": {
+            "active_services": 12,
+            "inactive_services": 3,
+            "most_popular_service": {
+                "name": "Web Development",
+                "orders_count": 45,
+                "revenue": "45000.00"
+            },
+            "services_performance": [
+                {
+                    "service_name": "Web Development",
+                    "orders_count": 45,
+                    "revenue": "45000.00",
+                    "average_rating": 4.8
+                }
+            ]
+        },
+        "reviews": {
+            "total_reviews": 85,
+            "average_rating": 4.6,
+            "rating_distribution": {
+                "5": 50,
+                "4": 25,
+                "3": 7,
+                "2": 2,
+                "1": 1
+            },
+            "recent_reviews": 15
+        },
+        "collaborators": {
+            "total_collaborators": 25,
+            "active_collaborators": 20,
+            "top_performers": [
+                {
+                    "collaborator_name": "John Doe",
+                    "completed_orders": 15,
+                    "total_earnings": "18000.00",
+                    "average_rating": 4.9
+                }
+            ],
+            "collaborator_earnings": "75000.00"
+        },
+        "recent_activity": [
+            {
+                "type": "order_created",
+                "description": "New order for Web Development",
+                "date": "2024-01-15T10:30:00Z",
+                "user": "client1"
+            }
+        ],
+        "financial": {
+            "total_revenue": "125000.00",
+            "completed_orders_revenue": "100000.00",
+            "pending_payments": "15000.00",
+            "average_order_value": "1250.00",
+            "monthly_revenue": "25000.00"
+        }
+    }
+    """
+    permission_classes = [IsAdminUser]
+    
+    def get(self, request):
+        """Get comprehensive admin statistics"""
+        from django.utils import timezone
+        from datetime import datetime, timedelta
+        from django.db.models import Count, Sum, Avg, Q
+        
+        # Overview statistics
+        total_users = User.objects.count()
+        total_clients = User.objects.filter(client_profile__isnull=False).count()
+        total_collaborators = User.objects.filter(collaborator_profile__isnull=False).count()
+        total_orders = Order.objects.count()
+        total_services = Service.objects.count()
+        total_reviews = Review.objects.count()
+        
+        # Financial overview
+        total_revenue = Order.objects.aggregate(
+            total=Sum('total_price')
+        )['total'] or 0
+        
+        # Order statistics
+        orders = Order.objects.all()
+        completed_orders = orders.filter(status__name__icontains='completed').count()
+        in_progress_orders = orders.filter(status__name__icontains='progress').count()
+        pending_orders = orders.filter(status__name__icontains='pending').count()
+        cancelled_orders = orders.filter(status__name__icontains='cancelled').count()
+        under_review_orders = orders.filter(status__name__icontains='review').count()
+        
+        # Financial calculations
+        completed_orders_revenue = orders.filter(status__name__icontains='completed').aggregate(
+            total=Sum('total_price')
+        )['total'] or 0
+        
+        pending_payments = orders.exclude(status__name__icontains='completed').aggregate(
+            total=Sum('total_price')
+        )['total'] or 0
+        
+        average_order_value = round(float(total_revenue / total_orders), 2) if total_orders > 0 else 0
+        
+        # User statistics
+        this_month = timezone.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        new_users_this_month = User.objects.filter(date_joined__gte=this_month).count()
+        active_clients = User.objects.filter(
+            client_profile__isnull=False,
+            client_profile__orders__isnull=False
+        ).distinct().count()
+        active_collaborators = User.objects.filter(
+            collaborator_profile__isnull=False,
+            collaborator_profile__is_active=True,
+            collaborator_profile__orders__isnull=False
+        ).distinct().count()
+        inactive_collaborators = User.objects.filter(
+            collaborator_profile__isnull=False,
+            collaborator_profile__is_active=False
+        ).count()
+        
+        # Service statistics
+        active_services = Service.objects.filter(is_active=True).count()
+        inactive_services = Service.objects.filter(is_active=False).count()
+        
+        # Most popular service
+        popular_service = Service.objects.annotate(
+            orders_count=Count('orders')
+        ).order_by('-orders_count').first()
+        
+        most_popular_service = None
+        if popular_service:
+            service_revenue = Order.objects.filter(service=popular_service).aggregate(
+                total=Sum('total_price')
+            )['total'] or 0
+            most_popular_service = {
+                'name': popular_service.name,
+                'orders_count': popular_service.orders_count,
+                'revenue': str(service_revenue)
+            }
+        
+        # Services performance
+        services_performance = []
+        for service in Service.objects.annotate(
+            orders_count=Count('orders')
+        ).filter(orders_count__gt=0).order_by('-orders_count')[:10]:
+            service_revenue = Order.objects.filter(service=service).aggregate(
+                total=Sum('total_price')
+            )['total'] or 0
+            
+            # Calculate average rating for this service
+            service_orders = Order.objects.filter(service=service)
+            service_reviews = Review.objects.filter(order__in=service_orders)
+            avg_rating = service_reviews.aggregate(avg=Avg('rating'))['avg'] or 0
+            
+            services_performance.append({
+                'service_name': service.name,
+                'orders_count': service.orders_count,
+                'revenue': str(service_revenue),
+                'average_rating': round(float(avg_rating), 2) if avg_rating else 0
+            })
+        
+        # Review statistics
+        reviews = Review.objects.all()
+        if reviews.exists():
+            average_rating = reviews.aggregate(avg=Avg('rating'))['avg'] or 0
+            rating_distribution = {
+                '5': reviews.filter(rating=5).count(),
+                '4': reviews.filter(rating=4).count(),
+                '3': reviews.filter(rating=3).count(),
+                '2': reviews.filter(rating=2).count(),
+                '1': reviews.filter(rating=1).count(),
+            }
+        else:
+            average_rating = 0
+            rating_distribution = {'5': 0, '4': 0, '3': 0, '2': 0, '1': 0}
+        
+        # Recent reviews (last 30 days)
+        thirty_days_ago = timezone.now() - timedelta(days=30)
+        recent_reviews = Review.objects.filter(date__gte=thirty_days_ago).count()
+        
+        # Collaborator statistics
+        collaborators = User.objects.filter(collaborator_profile__isnull=False)
+        active_collaborators_count = collaborators.filter(collaborator_profile__is_active=True).count()
+        
+        # Top performers
+        top_performers = []
+        for collaborator in collaborators.filter(collaborator_profile__is_active=True):
+            collaborator_orders = Order.objects.filter(collaborator=collaborator.collaborator_profile)
+            completed_collaborator_orders = collaborator_orders.filter(status__name__icontains='completed')
+            completed_count = completed_collaborator_orders.count()
+            
+            if completed_count > 0:
+                total_earnings = completed_collaborator_orders.aggregate(
+                    total=Sum('total_price')
+                )['total'] or 0
+                
+                # Get average rating for this collaborator
+                collaborator_reviews = Review.objects.filter(order__collaborator=collaborator.collaborator_profile)
+                avg_rating = collaborator_reviews.aggregate(avg=Avg('rating'))['avg'] or 0
+                
+                top_performers.append({
+                    'collaborator_name': collaborator.get_full_name() or collaborator.username,
+                    'completed_orders': completed_count,
+                    'total_earnings': str(total_earnings),
+                    'average_rating': round(float(avg_rating), 2) if avg_rating else 0
+                })
+        
+        # Sort by completed orders and take top 5
+        top_performers = sorted(top_performers, key=lambda x: x['completed_orders'], reverse=True)[:5]
+        
+        # Total collaborator earnings
+        collaborator_earnings = Order.objects.filter(
+            collaborator__isnull=False,
+            status__name__icontains='completed'
+        ).aggregate(total=Sum('total_price'))['total'] or 0
+        
+        # Recent activity (last 10 orders)
+        recent_orders = Order.objects.select_related(
+            'client__user', 'service', 'status'
+        ).order_by('-date')[:10]
+        
+        recent_activity = []
+        for order in recent_orders:
+            recent_activity.append({
+                'type': 'order_created',
+                'description': f"New order for {order.service.name}",
+                'date': order.date.isoformat(),
+                'user': order.client.user.username
+            })
+        
+        # Monthly revenue (current month)
+        current_month_start = timezone.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        monthly_revenue = Order.objects.filter(
+            date__gte=current_month_start,
+            status__name__icontains='completed'
+        ).aggregate(total=Sum('total_price'))['total'] or 0
+        
+        return Response({
+            'overview': {
+                'total_users': total_users,
+                'total_clients': total_clients,
+                'total_collaborators': total_collaborators,
+                'total_orders': total_orders,
+                'total_services': total_services,
+                'total_reviews': total_reviews,
+                'total_revenue': str(total_revenue)
+            },
+            'orders': {
+                'total_orders': total_orders,
+                'completed_orders': completed_orders,
+                'in_progress_orders': in_progress_orders,
+                'pending_orders': pending_orders,
+                'cancelled_orders': cancelled_orders,
+                'under_review_orders': under_review_orders,
+                'average_order_value': str(average_order_value),
+                'total_revenue': str(total_revenue),
+                'pending_payments': str(pending_payments)
+            },
+            'users': {
+                'new_users_this_month': new_users_this_month,
+                'active_clients': active_clients,
+                'active_collaborators': active_collaborators,
+                'inactive_collaborators': inactive_collaborators
+            },
+            'services': {
+                'active_services': active_services,
+                'inactive_services': inactive_services,
+                'most_popular_service': most_popular_service,
+                'services_performance': services_performance
+            },
+            'reviews': {
+                'total_reviews': total_reviews,
+                'average_rating': round(float(average_rating), 2) if average_rating else 0,
+                'rating_distribution': rating_distribution,
+                'recent_reviews': recent_reviews
+            },
+            'collaborators': {
+                'total_collaborators': total_collaborators,
+                'active_collaborators': active_collaborators_count,
+                'top_performers': top_performers,
+                'collaborator_earnings': str(collaborator_earnings)
+            },
+            'recent_activity': recent_activity,
+            'financial': {
+                'total_revenue': str(total_revenue),
+                'completed_orders_revenue': str(completed_orders_revenue),
+                'pending_payments': str(pending_payments),
+                'average_order_value': str(average_order_value),
+                'monthly_revenue': str(monthly_revenue)
+            }
+        })
