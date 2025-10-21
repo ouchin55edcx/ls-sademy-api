@@ -1051,3 +1051,24 @@ class ActiveCollaboratorListSerializer(serializers.ModelSerializer):
     
     def get_full_name(self, obj):
         return obj.user.get_full_name() or obj.user.username
+
+
+class ProfileUpdateSerializer(serializers.ModelSerializer):
+    """
+    Serializer for updating user profile information
+    """
+    class Meta:
+        model = User
+        fields = ['first_name', 'last_name', 'email', 'phone']
+    
+    def validate_email(self, value):
+        """Validate email uniqueness"""
+        if value and User.objects.filter(email=value).exclude(pk=self.instance.pk).exists():
+            raise serializers.ValidationError('A user with this email already exists.')
+        return value
+    
+    def validate_phone(self, value):
+        """Validate phone uniqueness"""
+        if value and User.objects.filter(phone=value).exclude(pk=self.instance.pk).exists():
+            raise serializers.ValidationError('A user with this phone number already exists.')
+        return value

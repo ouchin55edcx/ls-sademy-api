@@ -26,7 +26,7 @@ from core.serializers import (
     OrderStatusUpdateSerializer, OrderCancelSerializer, OrderCollaboratorAssignSerializer,
     StatusSerializer, ActiveCollaboratorListSerializer, OrderStatusHistorySerializer,
     LivrableCreateUpdateSerializer, LivrableListSerializer, LivrableDetailSerializer,
-    LivrableAcceptRejectSerializer, LivrableAdminReviewSerializer
+    LivrableAcceptRejectSerializer, LivrableAdminReviewSerializer, ProfileUpdateSerializer
 )
 from core.permissions import IsAdminUser, IsCollaboratorUser, IsClientUser, IsAdminOrCollaboratorUser
 
@@ -1793,3 +1793,54 @@ class LivrableFileDownloadAPIView(APIView):
                 {'error': 'Error reading file.'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+# ==================== PROFILE UPDATE ENDPOINT ====================
+
+class ProfileUpdateAPIView(generics.UpdateAPIView):
+    """
+    PATCH /api/profile/update/
+    
+    Update user profile information (first_name, last_name, email, phone)
+    
+    Request body:
+    {
+        "first_name": "John",
+        "last_name": "Doe", 
+        "email": "john.doe@example.com",
+        "phone": "+1234567890"
+    }
+    
+    Response:
+    {
+        "message": "Profile updated successfully",
+        "user": {
+            "id": 1,
+            "username": "john_doe",
+            "email": "john.doe@example.com",
+            "first_name": "John",
+            "last_name": "Doe",
+            "phone": "+1234567890",
+            "role": "client",
+            "role_id": 1
+        }
+    }
+    """
+    permission_classes = [IsAuthenticated]
+    serializer_class = ProfileUpdateSerializer
+    
+    def get_object(self):
+        """Return the authenticated user"""
+        return self.request.user
+    
+    def update(self, request, *args, **kwargs):
+        """Update user profile"""
+        user = self.get_object()
+        serializer = self.get_serializer(user, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        updated_user = serializer.save()
+        
+        return Response({
+            'message': 'Profile updated successfully',
+            'user': UserSerializer(updated_user).data
+        }, status=status.HTTP_200_OK)

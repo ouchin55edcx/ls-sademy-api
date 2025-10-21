@@ -36,7 +36,8 @@ from core.views import (
     ClientLivrableAcceptRejectAPIView,
     ClientReviewListCreateAPIView,
     ClientReviewRetrieveUpdateDestroyAPIView,
-    LivrableFileDownloadAPIView
+    LivrableFileDownloadAPIView,
+    ProfileUpdateAPIView
 )
 
 app_name = 'core'
@@ -110,4 +111,7 @@ urlpatterns = [
     
     # File Download (Collaborator, Client, Admin)
     path('livrables/<int:pk>/download/', LivrableFileDownloadAPIView.as_view(), name='livrable-file-download'),
+    
+    # Profile Update (All authenticated users)
+    path('profile/update/', ProfileUpdateAPIView.as_view(), name='profile-update'),
 ]
