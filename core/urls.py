@@ -24,7 +24,9 @@ from core.views import (
     ActiveCollaboratorListAPIView,
     CollaboratorOrderListAPIView,
     ClientOrderListAPIView,
+    ClientOrderCancelAPIView,
     ClientStatisticsAPIView,
+    OrderStatusHistoryAPIView,
     CollaboratorLivrableListCreateAPIView,
     CollaboratorLivrableRetrieveUpdateDestroyAPIView,
     AdminLivrableListAPIView,
@@ -71,6 +73,7 @@ urlpatterns = [
     path('admin/orders/', OrderListCreateAPIView.as_view(), name='admin-orders-list'),
     path('admin/orders/<int:pk>/', OrderRetrieveUpdateDestroyAPIView.as_view(), name='admin-order-detail'),
     path('admin/orders/<int:pk>/status/', OrderStatusUpdateAPIView.as_view(), name='admin-order-status-update'),
+    path('admin/orders/<int:order_id>/status-history/', OrderStatusHistoryAPIView.as_view(), name='admin-order-status-history'),
     path('admin/orders/<int:pk>/assign-collaborator/', OrderCollaboratorAssignAPIView.as_view(), name='admin-order-assign-collaborator'),
     path('admin/statuses/', StatusListAPIView.as_view(), name='admin-statuses-list'),
     path('admin/active-collaborators/', ActiveCollaboratorListAPIView.as_view(), name='admin-active-collaborators-list'),
@@ -78,11 +81,14 @@ urlpatterns = [
     # Collaborator - Order Management (Collaborator Only)
     path('collaborator/orders/', CollaboratorOrderListAPIView.as_view(), name='collaborator-orders-list'),
     path('collaborator/orders/<int:pk>/status/', OrderStatusUpdateAPIView.as_view(), name='collaborator-order-status-update'),
+    path('collaborator/orders/<int:order_id>/status-history/', OrderStatusHistoryAPIView.as_view(), name='collaborator-order-status-history'),
     path('collaborator/statuses/', StatusListAPIView.as_view(), name='collaborator-statuses-list'),
     path('collaborator/status/', CollaboratorStatusAPIView.as_view(), name='collaborator-status'),
     
     # Client - Order Management (Client Only)
     path('client/orders/', ClientOrderListAPIView.as_view(), name='client-orders-list'),
+    path('client/orders/<int:pk>/cancel/', ClientOrderCancelAPIView.as_view(), name='client-order-cancel'),
+    path('client/orders/<int:order_id>/status-history/', OrderStatusHistoryAPIView.as_view(), name='order-status-history'),
     path('client/statistics/', ClientStatisticsAPIView.as_view(), name='client-statistics'),
     
     # Collaborator - Livrable Management (Collaborator Only)

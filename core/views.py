@@ -15,7 +15,7 @@ from django.http import HttpResponse, Http404
 from django.shortcuts import get_object_or_404
 from django.conf import settings
 import os
-from core.models import Service, Review, Template, Order, Status, Collaborator, Livrable
+from core.models import Service, Review, Template, Order, Status, Collaborator, Livrable, OrderStatusHistory
 from core.serializers import (
     LoginSerializer, UserSerializer, ServiceListSerializer,
     ServiceDetailSerializer, AllReviewsSerializer, ReviewSerializer, ReviewCreateUpdateSerializer,
@@ -23,8 +23,8 @@ from core.serializers import (
     ServiceCreateUpdateSerializer, ServiceAdminListSerializer, ServiceToggleActiveSerializer,
     TemplateSerializer, TemplateCreateUpdateSerializer,
     OrderListSerializer, OrderCreateUpdateSerializer, OrderDetailSerializer,
-    OrderStatusUpdateSerializer, OrderCollaboratorAssignSerializer,
-    StatusSerializer, ActiveCollaboratorListSerializer,
+    OrderStatusUpdateSerializer, OrderCancelSerializer, OrderCollaboratorAssignSerializer,
+    StatusSerializer, ActiveCollaboratorListSerializer, OrderStatusHistorySerializer,
     LivrableCreateUpdateSerializer, LivrableListSerializer, LivrableDetailSerializer,
     LivrableAcceptRejectSerializer, LivrableAdminReviewSerializer
 )
@@ -1205,6 +1205,151 @@ class ClientOrderListAPIView(generics.ListAPIView):
             return [IsAuthenticated()]
         else:
             return [IsAdminUser()]
+
+
+class ClientOrderCancelAPIView(generics.UpdateAPIView):
+    """
+    PATCH /api/client/orders/{id}/cancel/
+    
+    Cancel an order (client only)
+    
+    Request body:
+    {
+        "cancellation_reason": "Changed requirements"
+    }
+    
+    Response:
+    {
+        "id": 1,
+        "status": 4,
+        "status_name": "Cancelled",
+        "message": "Order cancelled successfully",
+        "cancellation_reason": "Changed requirements"
+    }
+    """
+    permission_classes = [IsAuthenticated]
+    serializer_class = OrderCancelSerializer
+    queryset = Order.objects.select_related('status').all()
+    
+    def get_permissions(self):
+        """
+        Allow only clients to cancel their own orders
+        """
+        if hasattr(self.request.user, 'client_profile'):
+            return [IsAuthenticated()]
+        else:
+            return [IsAdminUser()]
+    
+    def get_queryset(self):
+        """Return only orders belonging to the authenticated client"""
+        if hasattr(self.request.user, 'client_profile'):
+            return Order.objects.filter(
+                client__user=self.request.user
+            ).select_related('status')
+        return Order.objects.none()
+    
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        
+        # Get the cancellation reason
+        cancellation_reason = request.data.get('cancellation_reason', '')
+        
+        # Get the "Cancelled" status
+        try:
+            cancelled_status = Status.objects.get(name='Cancelled')
+        except Status.DoesNotExist:
+            return Response(
+                {'error': 'Cancelled status not found in system.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        
+        # Update the order status to cancelled
+        instance.status = cancelled_status
+        instance.save()
+        
+        # Create status history entry
+        OrderStatusHistory.objects.create(
+            order=instance,
+            status=cancelled_status,
+            changed_by=request.user,
+            notes=f"Order cancelled by client. Reason: {cancellation_reason}" if cancellation_reason else "Order cancelled by client"
+        )
+        
+        return Response({
+            'id': instance.id,
+            'status': instance.status.id,
+            'status_name': instance.status.name,
+            'message': 'Order cancelled successfully',
+            'cancellation_reason': cancellation_reason
+        })
+
+
+class OrderStatusHistoryAPIView(generics.ListAPIView):
+    """
+    GET /api/client/orders/{order_id}/status-history/
+    
+    Get status history for a specific order (client can only access their own orders)
+    
+    Response:
+    [
+        {
+            "id": 1,
+            "status_name": "Pending",
+            "changed_by_username": "admin",
+            "changed_by_full_name": "Admin User",
+            "changed_at": "2024-01-15T10:30:00Z",
+            "notes": "Order created"
+        },
+        {
+            "id": 2,
+            "status_name": "In Progress",
+            "changed_by_username": "collaborator1",
+            "changed_by_full_name": "Ahmed Bennani",
+            "changed_at": "2024-01-16T14:20:00Z",
+            "notes": "Started working on the project"
+        }
+    ]
+    """
+    permission_classes = [IsAuthenticated]
+    serializer_class = OrderStatusHistorySerializer
+    
+    def get_queryset(self):
+        """Return status history for the specified order if user has access"""
+        order_id = self.kwargs.get('order_id')
+        
+        # Check if user is client and owns the order
+        if hasattr(self.request.user, 'client_profile'):
+            try:
+                order = Order.objects.get(
+                    id=order_id,
+                    client__user=self.request.user
+                )
+                return OrderStatusHistory.objects.filter(order=order).select_related(
+                    'status', 'changed_by'
+                ).order_by('-changed_at')
+            except Order.DoesNotExist:
+                return OrderStatusHistory.objects.none()
+        
+        # Check if user is admin or collaborator assigned to the order
+        elif (hasattr(self.request.user, 'admin_profile') or 
+              hasattr(self.request.user, 'collaborator_profile')):
+            try:
+                if hasattr(self.request.user, 'admin_profile'):
+                    # Admin can see any order
+                    order = Order.objects.get(id=order_id)
+                else:
+                    # Collaborator can only see orders assigned to them
+                    order = Order.objects.get(
+                        id=order_id,
+                        collaborator__user=self.request.user
+                    )
+                return OrderStatusHistory.objects.filter(order=order).select_related(
+                    'status', 'changed_by'
+                ).order_by('-changed_at')
+            except Order.DoesNotExist:
+                return OrderStatusHistory.objects.none()
+        
+        return OrderStatusHistory.objects.none()
 
 
 class ClientStatisticsAPIView(APIView):

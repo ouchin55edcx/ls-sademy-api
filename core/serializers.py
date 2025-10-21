@@ -5,7 +5,7 @@ Place this file in: core/serializers.py
 
 from rest_framework import serializers
 from django.contrib.auth import get_user_model, authenticate
-from core.models import Service, Review, Livrable, Order, Client, Template, Collaborator, Admin, Status
+from core.models import Service, Review, Livrable, Order, Client, Template, Collaborator, Admin, Status, OrderStatusHistory
 
 User = get_user_model()
 
@@ -753,6 +753,24 @@ class StatusSerializer(serializers.ModelSerializer):
         fields = ['id', 'name']
 
 
+class OrderStatusHistorySerializer(serializers.ModelSerializer):
+    """
+    Order Status History serializer for displaying status tracking
+    """
+    status_name = serializers.CharField(source='status.name', read_only=True)
+    changed_by_username = serializers.CharField(source='changed_by.username', read_only=True)
+    changed_by_full_name = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = OrderStatusHistory
+        fields = ['id', 'status_name', 'changed_by_username', 'changed_by_full_name', 'changed_at', 'notes']
+        
+    def get_changed_by_full_name(self, obj):
+        if obj.changed_by:
+            return obj.changed_by.get_full_name() or obj.changed_by.username
+        return "System"
+
+
 class CollaboratorSerializer(serializers.ModelSerializer):
     """
     Simple collaborator serializer
@@ -908,6 +926,7 @@ class OrderDetailSerializer(serializers.ModelSerializer):
     remaining_payment = serializers.ReadOnlyField()
     is_fully_paid = serializers.ReadOnlyField()
     livrables = LivrableSerializer(many=True, read_only=True)
+    status_history = OrderStatusHistorySerializer(many=True, read_only=True)
     
     class Meta:
         model = Order
@@ -933,7 +952,8 @@ class OrderDetailSerializer(serializers.ModelSerializer):
             'quotation',
             'lecture',
             'comment',
-            'livrables'
+            'livrables',
+            'status_history'
         ]
     
     def get_client_name(self, obj):
@@ -949,15 +969,57 @@ class OrderStatusUpdateSerializer(serializers.ModelSerializer):
     """
     Serializer for updating order status (admin and collaborator)
     """
+    notes = serializers.CharField(required=False, allow_blank=True, write_only=True, 
+                                  help_text="Optional notes about the status change")
+    
     class Meta:
         model = Order
-        fields = ['status']
+        fields = ['status', 'notes']
     
     def validate_status(self, value):
         """Validate that status exists"""
         if not value:
             raise serializers.ValidationError('Status is required.')
         return value
+    
+    def update(self, instance, validated_data):
+        """Update order status and set tracking attributes for signal handlers"""
+        notes = validated_data.pop('notes', '')
+        
+        # Set attributes for signal handlers to track who made the change
+        instance._changed_by_user = self.context.get('request').user if self.context.get('request') else None
+        instance._status_change_notes = notes
+        
+        return super().update(instance, validated_data)
+
+
+class OrderCancelSerializer(serializers.ModelSerializer):
+    """
+    Serializer for clients to cancel their orders
+    """
+    cancellation_reason = serializers.CharField(
+        required=False, 
+        allow_blank=True,
+        help_text="Optional reason for cancellation"
+    )
+    
+    class Meta:
+        model = Order
+        fields = ['cancellation_reason']
+    
+    def validate(self, data):
+        """Validate that the order can be cancelled"""
+        order = self.instance
+        
+        # Check if order is already cancelled
+        if order.status.name == 'Cancelled':
+            raise serializers.ValidationError('Order is already cancelled.')
+        
+        # Check if order is completed
+        if order.status.name == 'Completed':
+            raise serializers.ValidationError('Cannot cancel a completed order.')
+        
+        return data
 
 
 class OrderCollaboratorAssignSerializer(serializers.ModelSerializer):

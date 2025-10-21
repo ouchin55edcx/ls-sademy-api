@@ -1,5 +1,5 @@
 from django.contrib import admin
-from core.models import User, Admin, Collaborator, Client, Service, Template, Status, Order, Livrable, Review
+from core.models import User, Admin, Collaborator, Client, Service, Template, Status, Order, Livrable, Review, OrderStatusHistory
 
 # Register your models here.
 admin.site.register(User)
@@ -12,3 +12,4 @@ admin.site.register(Status)
 admin.site.register(Order)
 admin.site.register(Livrable)
 admin.site.register(Review)
+admin.site.register(OrderStatusHistory)

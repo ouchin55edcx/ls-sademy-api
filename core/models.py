@@ -1,6 +1,8 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.core.validators import MinValueValidator, MaxValueValidator
+from django.db.models.signals import post_save, pre_save
+from django.dispatch import receiver
 from decimal import Decimal
 
 
@@ -257,6 +259,41 @@ class Livrable(models.Model):
         return f"Livrable: {self.name} - Order #{self.order.id}"
 
 
+class OrderStatusHistory(models.Model):
+    """
+    Order Status History model - tracks all status changes for an order
+    """
+    order = models.ForeignKey(
+        Order,
+        on_delete=models.CASCADE,
+        related_name='status_history'
+    )
+    status = models.ForeignKey(
+        Status,
+        on_delete=models.PROTECT,
+        related_name='status_history'
+    )
+    changed_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='status_changes'
+    )
+    changed_at = models.DateTimeField(auto_now_add=True)
+    notes = models.TextField(blank=True, help_text="Optional notes about the status change")
+
+    class Meta:
+        db_table = 'order_status_history'
+        verbose_name = 'Order Status History'
+        verbose_name_plural = 'Order Status Histories'
+        ordering = ['-changed_at']
+
+    def __str__(self):
+        changed_by_name = self.changed_by.username if self.changed_by else "System"
+        return f"Order #{self.order.id} - {self.status.name} - {changed_by_name} - {self.changed_at.strftime('%Y-%m-%d %H:%M')}"
+
+
 class Review(models.Model):
     """
     Review model - linked to Order
@@ -302,3 +339,61 @@ class Review(models.Model):
         
         time_diff = timezone.now() - self.date
         return time_diff <= timedelta(hours=24)
+
+
+# Signal handlers for automatic status history tracking
+@receiver(post_save, sender=Order)
+def create_status_history_on_order_creation(sender, instance, created, **kwargs):
+    """
+    Create initial status history entry when an order is created
+    """
+    if created:
+        OrderStatusHistory.objects.create(
+            order=instance,
+            status=instance.status,
+            changed_by=None,  # System created
+            notes="Order created"
+        )
+
+
+@receiver(pre_save, sender=Order)
+def track_status_change(sender, instance, **kwargs):
+    """
+    Track status changes before saving the order
+    """
+    if instance.pk:  # Only for existing orders
+        try:
+            old_order = Order.objects.get(pk=instance.pk)
+            if old_order.status != instance.status:
+                # Store the old status to create history entry after save
+                instance._status_changed = True
+                instance._old_status = old_order.status
+        except Order.DoesNotExist:
+            pass
+
+
+@receiver(post_save, sender=Order)
+def create_status_history_on_status_change(sender, instance, created, **kwargs):
+    """
+    Create status history entry when status changes
+    """
+    if not created and hasattr(instance, '_status_changed') and instance._status_changed:
+        # Try to get the user from the current request context
+        # This will be set by the view when updating the order
+        changed_by = getattr(instance, '_changed_by_user', None)
+        notes = getattr(instance, '_status_change_notes', '')
+        
+        OrderStatusHistory.objects.create(
+            order=instance,
+            status=instance.status,
+            changed_by=changed_by,
+            notes=notes
+        )
+        
+        # Clean up temporary attributes
+        delattr(instance, '_status_changed')
+        delattr(instance, '_old_status')
+        if hasattr(instance, '_changed_by_user'):
+            delattr(instance, '_changed_by_user')
+        if hasattr(instance, '_status_change_notes'):
+            delattr(instance, '_status_change_notes')
