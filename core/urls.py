@@ -33,7 +33,8 @@ from core.views import (
     ClientLivrableListAPIView,
     ClientLivrableAcceptRejectAPIView,
     ClientReviewListCreateAPIView,
-    ClientReviewRetrieveUpdateDestroyAPIView
+    ClientReviewRetrieveUpdateDestroyAPIView,
+    LivrableFileDownloadAPIView
 )
 
 app_name = 'core'
@@ -100,4 +101,7 @@ urlpatterns = [
     # Client - Review Management (Client Only)
     path('client/reviews/', ClientReviewListCreateAPIView.as_view(), name='client-reviews-list-create'),
     path('client/reviews/<int:pk>/', ClientReviewRetrieveUpdateDestroyAPIView.as_view(), name='client-review-detail'),
+    
+    # File Download (Collaborator, Client, Admin)
+    path('livrables/<int:pk>/download/', LivrableFileDownloadAPIView.as_view(), name='livrable-file-download'),
 ]

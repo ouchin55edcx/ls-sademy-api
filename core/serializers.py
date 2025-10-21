@@ -284,9 +284,14 @@ class LivrableCreateUpdateSerializer(serializers.ModelSerializer):
     """
     Serializer for creating and updating livrables (collaborator only)
     """
+    file_url = serializers.SerializerMethodField(read_only=True)
+    
     class Meta:
         model = Livrable
-        fields = ['order', 'name', 'description', 'file_path']
+        fields = ['order', 'name', 'description', 'file_path', 'file_url']
+        extra_kwargs = {
+            'file_path': {'write_only': True}
+        }
     
     def validate_order(self, value):
         """Validate that the order exists and is assigned to the collaborator"""
@@ -306,6 +311,32 @@ class LivrableCreateUpdateSerializer(serializers.ModelSerializer):
         if not value or not value.strip():
             raise serializers.ValidationError('Livrable name is required.')
         return value.strip()
+    
+    def validate_file_path(self, value):
+        """Validate uploaded file"""
+        if value:
+            # Check file size (max 50MB)
+            max_size = 50 * 1024 * 1024  # 50MB
+            if value.size > max_size:
+                raise serializers.ValidationError('File size cannot exceed 50MB.')
+            
+            # Check file extension
+            allowed_extensions = ['.pdf', '.doc', '.docx', '.txt', '.zip', '.rar', '.jpg', '.jpeg', '.png', '.gif', '.mp4', '.avi', '.mov']
+            file_extension = value.name.lower().split('.')[-1]
+            if f'.{file_extension}' not in allowed_extensions:
+                raise serializers.ValidationError(
+                    f'File type not allowed. Allowed types: {", ".join(allowed_extensions)}'
+                )
+        
+        return value
+    
+    def get_file_url(self, obj):
+        """Return the URL to access the uploaded file"""
+        if obj.file_path:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.file_path.url)
+        return None
 
 
 class LivrableListSerializer(serializers.ModelSerializer):

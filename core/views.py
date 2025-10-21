@@ -8,8 +8,13 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.authtoken.models import Token
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from django.contrib.auth import login, get_user_model
 from django.db import models
+from django.http import HttpResponse, Http404
+from django.shortcuts import get_object_or_404
+from django.conf import settings
+import os
 from core.models import Service, Review, Template, Order, Status, Collaborator, Livrable
 from core.serializers import (
     LoginSerializer, UserSerializer, ServiceListSerializer,
@@ -1322,6 +1327,7 @@ class CollaboratorLivrableListCreateAPIView(generics.ListCreateAPIView):
     List and create livrables for the authenticated collaborator
     """
     permission_classes = [IsCollaboratorUser]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
     
     def get_serializer_class(self):
         if self.request.method == 'GET':
@@ -1586,3 +1592,61 @@ class ClientReviewRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPI
             )
         
         instance.delete()
+
+
+class LivrableFileDownloadAPIView(APIView):
+    """
+    GET /api/livrables/{id}/download/
+    
+    Download livrable file (accessible by collaborator, client, and admin)
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, pk):
+        """Download the livrable file"""
+        livrable = get_object_or_404(Livrable, pk=pk)
+        
+        # Check permissions
+        user = request.user
+        has_access = False
+        
+        if hasattr(user, 'collaborator_profile'):
+            # Collaborator can access their own livrables
+            has_access = livrable.order.collaborator == user.collaborator_profile
+        elif hasattr(user, 'client_profile'):
+            # Client can access livrables for their orders
+            has_access = livrable.order.client == user.client_profile
+        elif user.is_staff:
+            # Admin can access all livrables
+            has_access = True
+        
+        if not has_access:
+            return Response(
+                {'error': 'You do not have permission to access this file.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        if not livrable.file_path:
+            return Response(
+                {'error': 'No file attached to this livrable.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        try:
+            file_path = livrable.file_path.path
+            if not os.path.exists(file_path):
+                return Response(
+                    {'error': 'File not found on server.'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            with open(file_path, 'rb') as file:
+                response = HttpResponse(file.read(), content_type='application/octet-stream')
+                response['Content-Disposition'] = f'attachment; filename="{livrable.file_path.name}"'
+                return response
+                
+        except Exception as e:
+            return Response(
+                {'error': 'Error reading file.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

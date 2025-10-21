@@ -121,6 +121,60 @@ class CollaboratorLivrableTests(LivrableAPITestCase):
         self.assertEqual(response.data['name'], 'New Website')
         self.assertTrue(Livrable.objects.filter(name='New Website').exists())
     
+    def test_collaborator_create_livrable_with_file(self):
+        """Test collaborator can create livrable with file upload"""
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        
+        url = reverse('core:collaborator-livrables-list-create')
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.collaborator_token.key}')
+        
+        # Create a test file
+        test_file = SimpleUploadedFile(
+            "test_document.pdf",
+            b"file_content",
+            content_type="application/pdf"
+        )
+        
+        data = {
+            'order': self.order.id,
+            'name': 'Website with File',
+            'description': 'A website deliverable with attached file',
+            'file_path': test_file
+        }
+        
+        response = self.client.post(url, data, format='multipart')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['name'], 'Website with File')
+        self.assertIsNotNone(response.data['file_url'])
+        self.assertTrue(Livrable.objects.filter(name='Website with File').exists())
+    
+    def test_livrable_file_download(self):
+        """Test file download endpoint"""
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        
+        # Create a livrable with file
+        test_file = SimpleUploadedFile(
+            "test_document.pdf",
+            b"file_content",
+            content_type="application/pdf"
+        )
+        
+        livrable = Livrable.objects.create(
+            order=self.order,
+            name='Test File Livrable',
+            description='Test file',
+            file_path=test_file
+        )
+        
+        # Test collaborator can download their own file
+        url = reverse('core:livrable-file-download', kwargs={'pk': livrable.id})
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.collaborator_token.key}')
+        
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response['Content-Type'], 'application/octet-stream')
+        self.assertIn('attachment', response['Content-Disposition'])
+    
     def test_collaborator_cannot_create_livrable_for_unassigned_order(self):
         """Test collaborator cannot create livrable for order not assigned to them"""
         # Create another collaborator and order
