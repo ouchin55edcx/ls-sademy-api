@@ -1457,17 +1457,15 @@ class ClientLivrableListAPIView(generics.ListAPIView):
     """
     GET /api/client/livrables/
     
-    List livrables for the authenticated client (completed and reviewed by admin)
+    List all livrables for the authenticated client's orders
     """
     permission_classes = [IsClientUser]
     serializer_class = LivrableDetailSerializer
     
     def get_queryset(self):
-        """Return livrables for the client's completed orders that have been reviewed by admin"""
+        """Return all livrables for the client's orders"""
         return Livrable.objects.filter(
-            order__client__user=self.request.user,
-            order__status__name='under_review',
-            is_reviewed_by_admin=True
+            order__client__user=self.request.user
         ).select_related(
             'order__client__user', 'order__service', 'order__status', 'order__collaborator__user'
         ).all()
