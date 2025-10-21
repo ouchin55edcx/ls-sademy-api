@@ -20,6 +20,7 @@ from core.views import (
     OrderStatusUpdateAPIView,
     OrderCollaboratorAssignAPIView,
     StatusListAPIView,
+    CollaboratorStatusAPIView,
     ActiveCollaboratorListAPIView,
     CollaboratorOrderListAPIView,
     ClientOrderListAPIView,
@@ -77,6 +78,7 @@ urlpatterns = [
     path('collaborator/orders/', CollaboratorOrderListAPIView.as_view(), name='collaborator-orders-list'),
     path('collaborator/orders/<int:pk>/status/', OrderStatusUpdateAPIView.as_view(), name='collaborator-order-status-update'),
     path('collaborator/statuses/', StatusListAPIView.as_view(), name='collaborator-statuses-list'),
+    path('collaborator/status/', CollaboratorStatusAPIView.as_view(), name='collaborator-status'),
     
     # Client - Order Management (Client Only)
     path('client/orders/', ClientOrderListAPIView.as_view(), name='client-orders-list'),

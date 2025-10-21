@@ -1490,12 +1490,26 @@ class ClientLivrableAcceptRejectAPIView(generics.UpdateAPIView):
         """Update the livrable acceptance status"""
         is_accepted = serializer.validated_data['is_accepted']
         
-        if is_accepted:
-            # If accepting, we could trigger additional actions here
-            # like sending notifications, updating order status, etc.
-            pass
+        # Save the livrable first
+        livrable = serializer.save()
         
-        serializer.save()
+        if is_accepted:
+            # Check if all livrables for this order are accepted
+            order = livrable.order
+            all_livrables = Livrable.objects.filter(order=order)
+            all_accepted = all_livrables.filter(is_accepted=True).count() == all_livrables.count()
+            
+            # If all livrables are accepted, change order status to "Completed"
+            if all_accepted and all_livrables.count() > 0:
+                try:
+                    completed_status = Status.objects.get(name='Completed')
+                    order.status = completed_status
+                    order.save()
+                except Status.DoesNotExist:
+                    # If "Completed" status doesn't exist, create it
+                    completed_status = Status.objects.create(name='Completed')
+                    order.status = completed_status
+                    order.save()
 
 
 # ==================== CLIENT REVIEW ENDPOINTS ====================

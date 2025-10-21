@@ -749,6 +749,7 @@ class OrderListSerializer(serializers.ModelSerializer):
     collaborator_name = serializers.SerializerMethodField()
     remaining_payment = serializers.ReadOnlyField()
     is_fully_paid = serializers.ReadOnlyField()
+    has_livrable = serializers.SerializerMethodField()
     
     class Meta:
         model = Order
@@ -766,6 +767,7 @@ class OrderListSerializer(serializers.ModelSerializer):
             'advance_payment',
             'remaining_payment',
             'is_fully_paid',
+            'has_livrable',
             'discount',
             'quotation',
             'lecture',
@@ -779,6 +781,10 @@ class OrderListSerializer(serializers.ModelSerializer):
         if obj.collaborator:
             return obj.collaborator.user.get_full_name() or obj.collaborator.user.username
         return "Unassigned"
+    
+    def get_has_livrable(self, obj):
+        """Check if the order has any livrables"""
+        return obj.livrables.exists()
 
 
 class OrderCreateUpdateSerializer(serializers.ModelSerializer):

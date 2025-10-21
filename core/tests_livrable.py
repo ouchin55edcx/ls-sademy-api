@@ -479,6 +479,60 @@ class ClientLivrableTests(LivrableAPITestCase):
         self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.admin_token.key}')
         response = self.client.get(url)
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+    
+    def test_order_status_changes_to_completed_when_livrable_accepted(self):
+        """Test that order status automatically changes to 'Completed' when livrable is accepted"""
+        # First mark as reviewed by admin
+        self.livrable.is_reviewed_by_admin = True
+        self.livrable.save()
+        
+        # Ensure order is in 'under_review' status
+        self.order.status = Status.objects.get(name='under_review')
+        self.order.save()
+        
+        url = reverse('core:client-livrable-accept-reject', kwargs={'pk': self.livrable.id})
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.client_token.key}')
+        
+        data = {'is_accepted': True}
+        response = self.client.patch(url, data)
+        
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['is_accepted'])
+        
+        # Verify livrable is accepted
+        self.livrable.refresh_from_db()
+        self.assertTrue(self.livrable.is_accepted)
+        
+        # Verify order status changed to 'Completed'
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status.name, 'Completed')
+    
+    def test_order_status_does_not_change_when_livrable_rejected(self):
+        """Test that order status does not change when livrable is rejected"""
+        # First mark as reviewed by admin
+        self.livrable.is_reviewed_by_admin = True
+        self.livrable.save()
+        
+        # Ensure order is in 'under_review' status
+        self.order.status = Status.objects.get(name='under_review')
+        self.order.save()
+        
+        url = reverse('core:client-livrable-accept-reject', kwargs={'pk': self.livrable.id})
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.client_token.key}')
+        
+        data = {'is_accepted': False}
+        response = self.client.patch(url, data)
+        
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data['is_accepted'])
+        
+        # Verify livrable is rejected
+        self.livrable.refresh_from_db()
+        self.assertFalse(self.livrable.is_accepted)
+        
+        # Verify order status remains 'under_review'
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status.name, 'under_review')
 
 
 class LivrableValidationTests(LivrableAPITestCase):
