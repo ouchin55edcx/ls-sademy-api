@@ -362,6 +362,52 @@ class AdminLivrableTests(LivrableAPITestCase):
         self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.client_token.key}')
         response = self.client.get(url)
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+    
+    def test_admin_list_all_livrables(self):
+        """Test admin can list ALL livrables regardless of order status"""
+        # Create order with in-progress status
+        in_progress_order = Order.objects.create(
+            client=self.client_profile,
+            service=self.service,
+            status=self.in_progress_status,
+            collaborator=self.collaborator,
+            total_price=Decimal('1500.00'),
+            advance_payment=Decimal('750.00'),
+            quotation='In progress order'
+        )
+        
+        # Create livrable for in-progress order
+        Livrable.objects.create(
+            order=in_progress_order,
+            name='In Progress Website',
+            description='Should appear in admin all list'
+        )
+        
+        url = reverse('core:admin-all-livrables-list')
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.admin_token.key}')
+        
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 2)  # Both livrables should appear
+        
+        # Check that both livrables are returned
+        livrable_names = [livrable['name'] for livrable in response.data]
+        self.assertIn('Test Website', livrable_names)
+        self.assertIn('In Progress Website', livrable_names)
+    
+    def test_admin_all_livrables_unauthorized_access(self):
+        """Test that non-admin users cannot access admin all livrables endpoint"""
+        url = reverse('core:admin-all-livrables-list')
+        
+        # Test with collaborator token
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.collaborator_token.key}')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        
+        # Test with client token
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.client_token.key}')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
 
 class ClientLivrableTests(LivrableAPITestCase):

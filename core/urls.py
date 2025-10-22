@@ -31,6 +31,7 @@ from core.views import (
     CollaboratorLivrableListCreateAPIView,
     CollaboratorLivrableRetrieveUpdateDestroyAPIView,
     AdminLivrableListAPIView,
+    AdminAllLivrableListAPIView,
     AdminLivrableRetrieveAPIView,
     AdminLivrableReviewAPIView,
     ClientLivrableListAPIView,
@@ -110,6 +111,7 @@ urlpatterns = [
     
     # Admin - Livrable Review (Admin Only)
     path('admin/livrables/', AdminLivrableListAPIView.as_view(), name='admin-livrables-list'),
+    path('admin/livrables/all/', AdminAllLivrableListAPIView.as_view(), name='admin-all-livrables-list'),
     path('admin/livrables/<int:pk>/', AdminLivrableRetrieveAPIView.as_view(), name='admin-livrable-detail'),
     path('admin/livrables/<int:pk>/review/', AdminLivrableReviewAPIView.as_view(), name='admin-livrable-review'),
     

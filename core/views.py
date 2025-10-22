@@ -1827,6 +1827,23 @@ class AdminLivrableReviewAPIView(generics.UpdateAPIView):
         return Response(response_data)
 
 
+class AdminAllLivrableListAPIView(generics.ListAPIView):
+    """
+    GET /api/admin/livrables/all/
+    
+    List ALL livrables for admin (admin only)
+    This endpoint returns all livrables regardless of order status
+    """
+    permission_classes = [IsAdminUser]
+    serializer_class = LivrableListSerializer
+    
+    def get_queryset(self):
+        """Return all livrables for admin review"""
+        return Livrable.objects.select_related(
+            'order__client__user', 'order__service', 'order__status', 'order__collaborator__user'
+        ).all().order_by('-id')
+
+
 class ClientLivrableListAPIView(generics.ListAPIView):
     """
     GET /api/client/livrables/
