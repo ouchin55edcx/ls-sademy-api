@@ -15,7 +15,7 @@ from django.http import HttpResponse, Http404
 from django.shortcuts import get_object_or_404
 from django.conf import settings
 import os
-from core.models import Service, Review, Template, Order, Status, Collaborator, Livrable, OrderStatusHistory
+from core.models import Service, Review, Template, Order, Status, Collaborator, Livrable, OrderStatusHistory, GlobalSettings
 from core.serializers import (
     LoginSerializer, UserSerializer, ServiceListSerializer,
     ServiceDetailSerializer, AllReviewsSerializer, ReviewSerializer, ReviewCreateUpdateSerializer,
@@ -26,7 +26,8 @@ from core.serializers import (
     OrderStatusUpdateSerializer, OrderCancelSerializer, OrderCollaboratorAssignSerializer,
     StatusSerializer, ActiveCollaboratorListSerializer, OrderStatusHistorySerializer,
     LivrableCreateUpdateSerializer, LivrableListSerializer, LivrableDetailSerializer,
-    LivrableAcceptRejectSerializer, LivrableAdminReviewSerializer, ProfileUpdateSerializer
+    LivrableAcceptRejectSerializer, LivrableAdminReviewSerializer, ProfileUpdateSerializer,
+    GlobalSettingsSerializer
 )
 from core.permissions import IsAdminUser, IsCollaboratorUser, IsClientUser, IsAdminOrCollaboratorUser
 from core.email_service import EmailService
@@ -863,6 +864,11 @@ class OrderListCreateAPIView(generics.ListCreateAPIView):
         serializer.is_valid(raise_exception=True)
         order = serializer.save()
         
+        # Apply global commission settings if not explicitly set
+        if not order.commission_type or not order.commission_value:
+            order.apply_global_commission_settings()
+            order.save()
+        
         # Send email notification if collaborator is assigned
         email_sent = False
         if order.collaborator and order.collaborator.user.email:
@@ -978,15 +984,38 @@ class OrderStatusUpdateAPIView(generics.UpdateAPIView):
                     status=status.HTTP_403_FORBIDDEN
                 )
         
+        # Store the old status to check if it's being changed to cancelled
+        old_status = instance.status
+        
         serializer = self.get_serializer(instance, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
+        
+        # Check if status was changed to cancelled and send email notification
+        email_sent = False
+        if (old_status.name != instance.status.name and 
+            instance.status.name.lower() == 'cancelled' and 
+            instance.collaborator and 
+            instance.collaborator.user.email):
+            try:
+                # Get cancellation reason from notes if available
+                notes = request.data.get('notes', '')
+                cancellation_reason = notes if notes else 'Order cancelled by admin/collaborator'
+                
+                email_sent = EmailService.send_order_cancellation_email(
+                    instance, 
+                    instance.collaborator, 
+                    cancellation_reason
+                )
+            except Exception as e:
+                logging.error(f"Failed to send cancellation email: {str(e)}")
         
         return Response({
             'id': instance.id,
             'status': instance.status.id,
             'status_name': instance.status.name,
-            'message': 'Order status updated successfully'
+            'message': 'Order status updated successfully',
+            'email_sent': email_sent
         })
 
 
@@ -1311,12 +1340,25 @@ class ClientOrderCancelAPIView(generics.UpdateAPIView):
             notes=f"Order cancelled by client. Reason: {cancellation_reason}" if cancellation_reason else "Order cancelled by client"
         )
         
+        # Send email notification to collaborator if assigned
+        email_sent = False
+        if instance.collaborator and instance.collaborator.user.email:
+            try:
+                email_sent = EmailService.send_order_cancellation_email(
+                    instance, 
+                    instance.collaborator, 
+                    cancellation_reason
+                )
+            except Exception as e:
+                logging.error(f"Failed to send cancellation email: {str(e)}")
+        
         return Response({
             'id': instance.id,
             'status': instance.status.id,
             'status_name': instance.status.name,
             'message': 'Order cancelled successfully',
-            'cancellation_reason': cancellation_reason
+            'cancellation_reason': cancellation_reason,
+            'email_sent': email_sent
         })
 
 
@@ -1735,16 +1777,35 @@ class AdminLivrableReviewAPIView(generics.UpdateAPIView):
             'order__client__user', 'order__service', 'order__status', 'order__collaborator__user'
         ).all()
     
-    def perform_update(self, serializer):
-        """Update the livrable review status"""
+    def update(self, request, *args, **kwargs):
+        """Update livrable review status and send email notification"""
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        
         is_reviewed = serializer.validated_data['is_reviewed_by_admin']
         
-        if is_reviewed:
-            # If marking as reviewed, we could trigger additional actions here
-            # like sending notifications to the client, etc.
-            pass
+        # Save the livrable first
+        livrable = serializer.save()
         
-        serializer.save()
+        email_sent = False
+        if is_reviewed:
+            # Send email notification to client when livrable is reviewed
+            if livrable.order.client and livrable.order.client.user.email:
+                try:
+                    email_sent = EmailService.send_livrable_reviewed_email(
+                        livrable, 
+                        livrable.order.client
+                    )
+                except Exception as e:
+                    logging.error(f"Failed to send livrable reviewed email: {str(e)}")
+        
+        # Return response with email status
+        response_data = serializer.data
+        response_data['email_sent'] = email_sent
+        response_data['message'] = 'Livrable review status updated successfully'
+        
+        return Response(response_data)
 
 
 class ClientLivrableListAPIView(generics.ListAPIView):
@@ -2369,3 +2430,52 @@ class TestEmailAPIView(APIView):
                 'success': False,
                 'message': f'Error sending test email: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# Global Settings Management Views
+
+class GlobalSettingsRetrieveUpdateAPIView(generics.RetrieveUpdateAPIView):
+    """
+    GET /api/admin/global-settings/
+    PUT /api/admin/global-settings/
+    PATCH /api/admin/global-settings/
+    
+    Retrieve or update global settings (admin only)
+    
+    GET Response:
+    {
+        "id": 1,
+        "commission_type": "percentage",
+        "commission_value": "20.00",
+        "is_commission_enabled": true,
+        "created_at": "2024-01-15T10:30:00Z",
+        "updated_at": "2024-01-15T10:30:00Z",
+        "updated_by": null
+    }
+    
+    PUT/PATCH Request body:
+    {
+        "commission_type": "percentage",
+        "commission_value": "25.00",
+        "is_commission_enabled": true
+    }
+    """
+    permission_classes = [IsAuthenticated, IsAdminUser]
+    serializer_class = GlobalSettingsSerializer
+    
+    def get_object(self):
+        """Get or create the global settings instance"""
+        return GlobalSettings.get_settings()
+    
+    def update(self, request, *args, **kwargs):
+        """Update global settings and track who made the change"""
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=kwargs.get('partial', False))
+        serializer.is_valid(raise_exception=True)
+        
+        # Set the user who updated the settings
+        serializer.validated_data['updated_by'] = request.user
+        
+        self.perform_update(serializer)
+        
+        return Response(serializer.data)

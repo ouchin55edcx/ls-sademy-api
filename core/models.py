@@ -110,6 +110,7 @@ class Service(models.Model):
     is_active = models.BooleanField(default=True)
     tool_name = models.CharField(max_length=100, blank=True)
     audio_file = models.FileField(upload_to='media/services/audio/', blank=True, null=True)
+    file_audio = models.FileField(upload_to='media/', blank=True, null=True, help_text="Audio file for the service")
 
     class Meta:
         db_table = 'services'
@@ -159,6 +160,72 @@ class Status(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class GlobalSettings(models.Model):
+    """
+    Global Settings model for application-wide configuration
+    """
+    COMMISSION_TYPE_CHOICES = [
+        ('percentage', 'Percentage'),
+        ('fixed', 'Fixed Amount'),
+    ]
+    
+    # Sademy Commission Settings
+    commission_type = models.CharField(
+        max_length=20,
+        choices=COMMISSION_TYPE_CHOICES,
+        default='percentage',
+        help_text="Type of commission calculation"
+    )
+    commission_value = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal('20.00'),
+        validators=[MinValueValidator(Decimal('0.00'))],
+        help_text="Commission value (percentage or fixed amount)"
+    )
+    is_commission_enabled = models.BooleanField(
+        default=True,
+        help_text="Enable/disable automatic commission calculation"
+    )
+    
+    # Metadata
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='settings_updates'
+    )
+
+    class Meta:
+        db_table = 'global_settings'
+        verbose_name = 'Global Settings'
+        verbose_name_plural = 'Global Settings'
+
+    def __str__(self):
+        return f"Global Settings - Commission: {self.commission_value} ({self.commission_type})"
+    
+    def save(self, *args, **kwargs):
+        # Ensure only one instance exists
+        if not self.pk and GlobalSettings.objects.exists():
+            raise ValueError("Only one GlobalSettings instance is allowed")
+        super().save(*args, **kwargs)
+    
+    @classmethod
+    def get_settings(cls):
+        """Get the global settings instance, create if doesn't exist"""
+        settings, created = cls.objects.get_or_create(
+            defaults={
+                'commission_type': 'percentage',
+                'commission_value': Decimal('20.00'),
+                'is_commission_enabled': True,
+            }
+        )
+        return settings
 
 
 class Order(models.Model):
@@ -213,6 +280,38 @@ class Order(models.Model):
     )
     lecture = models.TextField(blank=True)
     comment = models.TextField(blank=True)
+    
+    # Sademy Commission fields
+    sademy_commission_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        validators=[MinValueValidator(Decimal('0.00'))],
+        help_text="Calculated Sademy commission amount"
+    )
+    commission_type = models.CharField(
+        max_length=20,
+        choices=GlobalSettings.COMMISSION_TYPE_CHOICES,
+        default='percentage',
+        help_text="Type of commission applied to this order"
+    )
+    commission_value = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        validators=[MinValueValidator(Decimal('0.00'))],
+        help_text="Commission value applied to this order"
+    )
+    
+    # Blacklist fields
+    is_blacklisted = models.BooleanField(
+        default=False,
+        help_text="Mark this order as blacklisted"
+    )
+    blacklist_reason = models.TextField(
+        blank=True,
+        help_text="Reason for blacklisting (required if is_blacklisted is True)"
+    )
 
     class Meta:
         db_table = 'orders'
@@ -233,6 +332,56 @@ class Order(models.Model):
     def is_fully_paid(self):
         """Check if order is fully paid"""
         return self.advance_payment >= self.total_price
+    
+    def calculate_commission(self, commission_type=None, commission_value=None):
+        """
+        Calculate Sademy commission based on order price and commission settings
+        """
+        if commission_type is None:
+            commission_type = self.commission_type
+        if commission_value is None:
+            commission_value = self.commission_value
+            
+        if commission_type == 'percentage':
+            # Calculate percentage commission
+            commission_amount = (self.total_price * commission_value) / 100
+        else:  # fixed amount
+            commission_amount = commission_value
+            
+        return commission_amount
+    
+    def apply_global_commission_settings(self):
+        """
+        Apply global commission settings to this order
+        """
+        try:
+            global_settings = GlobalSettings.get_settings()
+            if global_settings.is_commission_enabled:
+                self.commission_type = global_settings.commission_type
+                self.commission_value = global_settings.commission_value
+                self.sademy_commission_amount = self.calculate_commission()
+        except Exception as e:
+            # Log error but don't fail the order creation
+            import logging
+            logging.error(f"Failed to apply global commission settings: {str(e)}")
+    
+    def clean(self):
+        """
+        Validate order data
+        """
+        from django.core.exceptions import ValidationError
+        
+        # Validate blacklist reason is provided when order is blacklisted
+        if self.is_blacklisted and not self.blacklist_reason.strip():
+            raise ValidationError({
+                'blacklist_reason': 'Blacklist reason is required when order is blacklisted.'
+            })
+        
+        # Validate commission value based on type
+        if self.commission_type == 'percentage' and self.commission_value > 100:
+            raise ValidationError({
+                'commission_value': 'Percentage commission cannot exceed 100%.'
+            })
 
 
 class Livrable(models.Model):

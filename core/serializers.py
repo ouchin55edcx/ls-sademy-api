@@ -5,7 +5,7 @@ Place this file in: core/serializers.py
 
 from rest_framework import serializers
 from django.contrib.auth import get_user_model, authenticate
-from core.models import Service, Review, Livrable, Order, Client, Template, Collaborator, Admin, Status, OrderStatusHistory
+from core.models import Service, Review, Livrable, Order, Client, Template, Collaborator, Admin, Status, OrderStatusHistory, GlobalSettings
 
 User = get_user_model()
 
@@ -242,6 +242,7 @@ class ServiceListSerializer(serializers.ModelSerializer):
             'tool_name',
             'is_active',
             'audio_file',
+            'file_audio',
             'templates_count',
             'reviews_count',
             'average_rating'
@@ -473,6 +474,7 @@ class ServiceDetailSerializer(serializers.ModelSerializer):
             'tool_name',
             'is_active',
             'audio_file',
+            'file_audio',
             'templates',
             'reviews_count',
             'average_rating',
@@ -681,7 +683,8 @@ class ServiceCreateUpdateSerializer(serializers.ModelSerializer):
             'description',
             'tool_name',
             'is_active',
-            'audio_file'
+            'audio_file',
+            'file_audio'
         ]
     
     def validate_name(self, value):
@@ -710,6 +713,7 @@ class ServiceAdminListSerializer(serializers.ModelSerializer):
             'tool_name',
             'is_active',
             'audio_file',
+            'file_audio',
             'templates_count',
             'orders_count',
             'reviews_count',
@@ -820,7 +824,12 @@ class OrderListSerializer(serializers.ModelSerializer):
             'discount',
             'quotation',
             'lecture',
-            'comment'
+            'comment',
+            'sademy_commission_amount',
+            'commission_type',
+            'commission_value',
+            'is_blacklisted',
+            'blacklist_reason'
         ]
     
     def get_client_name(self, obj):
@@ -853,7 +862,11 @@ class OrderCreateUpdateSerializer(serializers.ModelSerializer):
             'discount',
             'quotation',
             'lecture',
-            'comment'
+            'comment',
+            'commission_type',
+            'commission_value',
+            'is_blacklisted',
+            'blacklist_reason'
         ]
     
     def validate_client(self, value):
@@ -900,14 +913,37 @@ class OrderCreateUpdateSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError('Discount cannot be negative.')
         return value
     
+    def validate_commission_value(self, value):
+        """Validate commission value"""
+        if value < 0:
+            raise serializers.ValidationError('Commission value cannot be negative.')
+        return value
+    
     def validate(self, data):
         """Cross-field validation"""
         advance_payment = data.get('advance_payment', 0)
         total_price = data.get('total_price')
+        is_blacklisted = data.get('is_blacklisted', False)
+        blacklist_reason = data.get('blacklist_reason', '')
+        commission_type = data.get('commission_type', 'percentage')
+        commission_value = data.get('commission_value', 0)
         
-        if advance_payment > total_price:
+        # Only validate advance_payment vs total_price if both are provided
+        if total_price is not None and advance_payment > total_price:
             raise serializers.ValidationError({
                 'advance_payment': 'Advance payment cannot be greater than total price.'
+            })
+        
+        # Validate blacklist reason is provided when order is blacklisted
+        if is_blacklisted and not blacklist_reason.strip():
+            raise serializers.ValidationError({
+                'blacklist_reason': 'Blacklist reason is required when order is blacklisted.'
+            })
+        
+        # Validate commission value based on type
+        if commission_type == 'percentage' and commission_value > 100:
+            raise serializers.ValidationError({
+                'commission_value': 'Percentage commission cannot exceed 100%.'
             })
         
         return data
@@ -952,6 +988,11 @@ class OrderDetailSerializer(serializers.ModelSerializer):
             'quotation',
             'lecture',
             'comment',
+            'sademy_commission_amount',
+            'commission_type',
+            'commission_value',
+            'is_blacklisted',
+            'blacklist_reason',
             'livrables',
             'status_history'
         ]
@@ -963,6 +1004,43 @@ class OrderDetailSerializer(serializers.ModelSerializer):
         if obj.collaborator:
             return obj.collaborator.user.get_full_name() or obj.collaborator.user.username
         return "Unassigned"
+
+
+class GlobalSettingsSerializer(serializers.ModelSerializer):
+    """
+    Serializer for GlobalSettings model
+    """
+    class Meta:
+        model = GlobalSettings
+        fields = [
+            'id',
+            'commission_type',
+            'commission_value',
+            'is_commission_enabled',
+            'created_at',
+            'updated_at',
+            'updated_by'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at', 'updated_by']
+    
+    def validate_commission_value(self, value):
+        """Validate commission value"""
+        if value < 0:
+            raise serializers.ValidationError('Commission value cannot be negative.')
+        return value
+    
+    def validate(self, data):
+        """Cross-field validation"""
+        commission_type = data.get('commission_type', 'percentage')
+        commission_value = data.get('commission_value', 0)
+        
+        # Validate commission value based on type
+        if commission_type == 'percentage' and commission_value > 100:
+            raise serializers.ValidationError({
+                'commission_value': 'Percentage commission cannot exceed 100%.'
+            })
+        
+        return data
 
 
 class OrderStatusUpdateSerializer(serializers.ModelSerializer):
