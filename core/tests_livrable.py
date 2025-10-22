@@ -588,6 +588,41 @@ class ClientLivrableTests(LivrableAPITestCase):
         self.order.refresh_from_db()
         self.assertEqual(self.order.status.name, 'under_review')
 
+    def test_order_status_changes_to_under_review_when_livrable_created(self):
+        """Test that order status automatically changes to 'under_review' when collaborator creates a livrable"""
+        # Ensure order starts with 'in_progress' status
+        in_progress_status = Status.objects.get(name='in_progress')
+        self.order.status = in_progress_status
+        self.order.save()
+        
+        url = reverse('core:collaborator-livrables-list-create')
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.collaborator_token.key}')
+        
+        data = {
+            'order': self.order.id,
+            'name': 'New Deliverable',
+            'description': 'A new deliverable that should trigger status change'
+        }
+        
+        response = self.client.post(url, data)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        
+        # Verify livrable was created
+        self.assertTrue(Livrable.objects.filter(name='New Deliverable').exists())
+        
+        # Verify order status changed to 'under_review'
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status.name, 'under_review')
+        
+        # Verify status history was created
+        status_history = OrderStatusHistory.objects.filter(
+            order=self.order,
+            status__name='under_review'
+        ).first()
+        self.assertIsNotNone(status_history)
+        self.assertEqual(status_history.changed_by, self.collaborator_user)
+        self.assertIn('New Deliverable', status_history.notes)
+
 
 class LivrableValidationTests(LivrableAPITestCase):
     """Test livrable validation and edge cases"""

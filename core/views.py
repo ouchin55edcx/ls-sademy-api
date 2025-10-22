@@ -1660,7 +1660,8 @@ class CollaboratorLivrableListCreateAPIView(generics.ListCreateAPIView):
     GET /api/collaborator/livrables/
     POST /api/collaborator/livrables/
     
-    List and create livrables for the authenticated collaborator
+    List and create livrables for the authenticated collaborator.
+    When a collaborator submits a deliverable (POST), the order status is automatically changed to "under_review".
     """
     permission_classes = [IsCollaboratorUser]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
@@ -1686,7 +1687,25 @@ class CollaboratorLivrableListCreateAPIView(generics.ListCreateAPIView):
         if order.collaborator != self.request.user.collaborator_profile:
             raise serializers.ValidationError('You can only create livrables for orders assigned to you.')
         
-        serializer.save()
+        # Save the livrable first
+        livrable = serializer.save()
+        
+        # Automatically change order status to "under_review" when collaborator submits a deliverable
+        try:
+            under_review_status = Status.objects.get(name='under_review')
+            if order.status != under_review_status:
+                # Set attributes for signal handlers to track who made the change
+                order._changed_by_user = self.request.user
+                order._status_change_notes = f'Status changed automatically when collaborator submitted deliverable: {livrable.name}'
+                order.status = under_review_status
+                order.save()
+        except Status.DoesNotExist:
+            # If "under_review" status doesn't exist, create it
+            under_review_status = Status.objects.create(name='under_review')
+            order._changed_by_user = self.request.user
+            order._status_change_notes = f'Status changed automatically when collaborator submitted deliverable: {livrable.name}'
+            order.status = under_review_status
+            order.save()
 
 
 class CollaboratorLivrableRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):
