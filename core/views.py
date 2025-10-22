@@ -29,6 +29,8 @@ from core.serializers import (
     LivrableAcceptRejectSerializer, LivrableAdminReviewSerializer, ProfileUpdateSerializer
 )
 from core.permissions import IsAdminUser, IsCollaboratorUser, IsClientUser, IsAdminOrCollaboratorUser
+from core.email_service import EmailService
+import logging
 
 User = get_user_model()
 
@@ -815,7 +817,7 @@ class OrderListCreateAPIView(generics.ListCreateAPIView):
             "client_email": "client1@example.com",
             "client_phone": "+212600000004",
             "service_name": "Web Development",
-            "status_name": "In Progress",
+            "status_name": "in_progress",
             "collaborator_name": "Ahmed Benali",
             "date": "2024-01-15T10:30:00Z",
             "deadline_date": "2024-02-15T10:30:00Z",
@@ -854,6 +856,26 @@ class OrderListCreateAPIView(generics.ListCreateAPIView):
         if self.request.method == 'GET':
             return OrderListSerializer
         return OrderCreateUpdateSerializer
+    
+    def create(self, request, *args, **kwargs):
+        """Create order and send email if collaborator is assigned"""
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        order = serializer.save()
+        
+        # Send email notification if collaborator is assigned
+        email_sent = False
+        if order.collaborator and order.collaborator.user.email:
+            try:
+                email_sent = EmailService.send_order_assignment_email(order, order.collaborator)
+            except Exception as e:
+                logging.error(f"Failed to send assignment email: {str(e)}")
+        
+        # Return order data with email status
+        response_data = OrderListSerializer(order).data
+        response_data['email_sent'] = email_sent
+        
+        return Response(response_data, status=status.HTTP_201_CREATED)
 
 
 class OrderRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):
@@ -875,7 +897,7 @@ class OrderRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):
         "service": 1,
         "service_name": "Web Development",
         "status": 2,
-        "status_name": "In Progress",
+        "status_name": "in_progress",
         "collaborator": 1,
         "collaborator_name": "Ahmed Benali",
         "date": "2024-01-15T10:30:00Z",
@@ -926,7 +948,7 @@ class OrderStatusUpdateAPIView(generics.UpdateAPIView):
     {
         "id": 1,
         "status": 3,
-        "status_name": "Completed",
+        "status_name": "completed",
         "message": "Order status updated successfully"
     }
     """
@@ -993,19 +1015,33 @@ class OrderCollaboratorAssignAPIView(generics.UpdateAPIView):
     
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
+        old_collaborator = instance.collaborator
         serializer = self.get_serializer(instance, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
         
+        # Refresh instance to get updated collaborator
+        instance.refresh_from_db()
+        
         collaborator_name = "Unassigned"
+        email_sent = False
+        
         if instance.collaborator:
             collaborator_name = instance.collaborator.user.get_full_name() or instance.collaborator.user.username
+            
+            # Send email notification if collaborator was assigned and is different from before
+            if instance.collaborator != old_collaborator and instance.collaborator.user.email:
+                try:
+                    email_sent = EmailService.send_order_assignment_email(instance, instance.collaborator)
+                except Exception as e:
+                    logging.error(f"Failed to send assignment email: {str(e)}")
         
         return Response({
             'id': instance.id,
             'collaborator': instance.collaborator.user.id if instance.collaborator else None,
             'collaborator_name': collaborator_name,
-            'message': 'Collaborator assigned successfully'
+            'message': 'Collaborator assigned successfully',
+            'email_sent': email_sent
         })
 
 
@@ -1020,11 +1056,11 @@ class StatusListAPIView(generics.ListAPIView):
     [
         {
             "id": 1,
-            "name": "Pending"
+            "name": "pending"
         },
         {
             "id": 2,
-            "name": "In Progress"
+            "name": "in_progress"
         }
     ]
     """
@@ -1114,7 +1150,7 @@ class CollaboratorOrderListAPIView(generics.ListAPIView):
             "id": 1,
             "client_name": "Youssef Tazi",
             "service_name": "Web Development",
-            "status_name": "In Progress",
+            "status_name": "in_progress",
             "date": "2024-01-15T10:30:00Z",
             "deadline_date": "2024-02-15T10:30:00Z",
             "total_price": "1500.00",
@@ -1160,7 +1196,7 @@ class ClientOrderListAPIView(generics.ListAPIView):
             "id": 1,
             "client_name": "Youssef Tazi",
             "service_name": "Web Development",
-            "status_name": "In Progress",
+            "status_name": "in_progress",
             "collaborator_name": "Ahmed Bennani",
             "date": "2024-01-15T10:30:00Z",
             "deadline_date": "2024-02-15T10:30:00Z",
@@ -1222,7 +1258,7 @@ class ClientOrderCancelAPIView(generics.UpdateAPIView):
     {
         "id": 1,
         "status": 4,
-        "status_name": "Cancelled",
+        "status_name": "cancelled",
         "message": "Order cancelled successfully",
         "cancellation_reason": "Changed requirements"
     }
@@ -1254,9 +1290,9 @@ class ClientOrderCancelAPIView(generics.UpdateAPIView):
         # Get the cancellation reason
         cancellation_reason = request.data.get('cancellation_reason', '')
         
-        # Get the "Cancelled" status
+        # Get the "cancelled" status
         try:
-            cancelled_status = Status.objects.get(name='Cancelled')
+            cancelled_status = Status.objects.get(name='cancelled')
         except Status.DoesNotExist:
             return Response(
                 {'error': 'Cancelled status not found in system.'},
@@ -1294,7 +1330,7 @@ class OrderStatusHistoryAPIView(generics.ListAPIView):
     [
         {
             "id": 1,
-            "status_name": "Pending",
+            "status_name": "pending",
             "changed_by_username": "admin",
             "changed_by_full_name": "Admin User",
             "changed_at": "2024-01-15T10:30:00Z",
@@ -1302,7 +1338,7 @@ class OrderStatusHistoryAPIView(generics.ListAPIView):
         },
         {
             "id": 2,
-            "status_name": "In Progress",
+            "status_name": "in_progress",
             "changed_by_username": "collaborator1",
             "changed_by_full_name": "Ahmed Bennani",
             "changed_at": "2024-01-16T14:20:00Z",
@@ -1761,15 +1797,15 @@ class ClientLivrableAcceptRejectAPIView(generics.UpdateAPIView):
             all_livrables = Livrable.objects.filter(order=order)
             all_accepted = all_livrables.filter(is_accepted=True).count() == all_livrables.count()
             
-            # If all livrables are accepted, change order status to "Completed"
+            # If all livrables are accepted, change order status to "completed"
             if all_accepted and all_livrables.count() > 0:
                 try:
-                    completed_status = Status.objects.get(name='Completed')
+                    completed_status = Status.objects.get(name='completed')
                     order.status = completed_status
                     order.save()
                 except Status.DoesNotExist:
-                    # If "Completed" status doesn't exist, create it
-                    completed_status = Status.objects.create(name='Completed')
+                    # If "completed" status doesn't exist, create it
+                    completed_status = Status.objects.create(name='completed')
                     order.status = completed_status
                     order.save()
 
@@ -2280,3 +2316,56 @@ class AdminStatisticsAPIView(APIView):
                 'monthly_revenue': str(monthly_revenue)
             }
         })
+
+
+class TestEmailAPIView(APIView):
+    """
+    POST /api/admin/test-email/
+    
+    Send a test email to verify email configuration (admin only)
+    
+    Request body:
+    {
+        "email": "test@example.com",
+        "subject": "Test Email",
+        "message": "This is a test email"
+    }
+    
+    Response:
+    {
+        "success": true,
+        "message": "Test email sent successfully"
+    }
+    """
+    permission_classes = [IsAuthenticated, IsAdminUser]
+    
+    def post(self, request):
+        email = request.data.get('email')
+        subject = request.data.get('subject', 'Test Email')
+        message = request.data.get('message', 'This is a test email from Sademiy Order Management System')
+        
+        if not email:
+            return Response({
+                'success': False,
+                'message': 'Email address is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            success = EmailService.send_test_email(email, subject, message)
+            
+            if success:
+                return Response({
+                    'success': True,
+                    'message': 'Test email sent successfully'
+                })
+            else:
+                return Response({
+                    'success': False,
+                    'message': 'Failed to send test email'
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                
+        except Exception as e:
+            return Response({
+                'success': False,
+                'message': f'Error sending test email: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

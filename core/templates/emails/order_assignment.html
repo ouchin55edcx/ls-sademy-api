@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>New Order Assignment</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f4f4f4;
+        }
+        .container {
+            background-color: #ffffff;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .header {
+            background-color: #2c3e50;
+            color: white;
+            padding: 20px;
+            margin: -30px -30px 30px -30px;
+            border-radius: 8px 8px 0 0;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 24px;
+        }
+        .order-info {
+            background-color: #ecf0f1;
+            padding: 20px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        .order-details {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-left: 4px solid #3498db;
+            margin: 15px 0;
+        }
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            margin: 10px 0;
+            padding: 5px 0;
+            border-bottom: 1px solid #eee;
+        }
+        .detail-label {
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        .detail-value {
+            color: #7f8c8d;
+        }
+        .price-highlight {
+            background-color: #e8f5e8;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        .footer {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+            text-align: center;
+            color: #7f8c8d;
+            font-size: 14px;
+        }
+        .button {
+            display: inline-block;
+            background-color: #3498db;
+            color: white;
+            padding: 12px 24px;
+            text-decoration: none;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        .urgent {
+            background-color: #e74c3c;
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎯 New Order Assignment</h1>
+        </div>
+        
+        <p>Hello <strong>{{ collaborator.user.get_full_name|default:collaborator.user.username }}</strong>,</p>
+        
+        <p>You have been assigned to a new order. Please review the details below:</p>
+        
+        <div class="order-info">
+            <h2>📋 Order Information</h2>
+            <div class="detail-row">
+                <span class="detail-label">Order ID:</span>
+                <span class="detail-value">#{{ order.id }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Client:</span>
+                <span class="detail-value">{{ client.user.get_full_name|default:client.user.username }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Service:</span>
+                <span class="detail-value">{{ service.name }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Status:</span>
+                <span class="detail-value">{{ status.name|title }}</span>
+            </div>
+        </div>
+        
+        <div class="order-details">
+            <h3>💰 Financial Details</h3>
+            <div class="price-highlight">
+                <div class="detail-row">
+                    <span class="detail-label">Total Price:</span>
+                    <span class="detail-value">${{ total_price }}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Advance Payment:</span>
+                    <span class="detail-value">${{ advance_payment }}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Remaining Payment:</span>
+                    <span class="detail-value">${{ remaining_payment }}</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="order-details">
+            <h3>📅 Timeline</h3>
+            <div class="detail-row">
+                <span class="detail-label">Order Date:</span>
+                <span class="detail-value">{{ order.date|date:"F d, Y" }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Deadline:</span>
+                <span class="detail-value">{{ deadline_date|date:"F d, Y" }}</span>
+            </div>
+        </div>
+        
+        {% if quotation %}
+        <div class="order-details">
+            <h3>📝 Quotation</h3>
+            <p>{{ quotation }}</p>
+        </div>
+        {% endif %}
+        
+        {% if lecture %}
+        <div class="order-details">
+            <h3>📚 Instructions</h3>
+            <p>{{ lecture }}</p>
+        </div>
+        {% endif %}
+        
+        {% if comment %}
+        <div class="order-details">
+            <h3>💬 Comments</h3>
+            <p>{{ comment }}</p>
+        </div>
+        {% endif %}
+        
+        <div class="footer">
+            <p>This is an automated notification from the Sademiy Order Management System.</p>
+            <p>Please log in to your account to view more details and start working on this order.</p>
+        </div>
+    </div>
+</body>
+</html>

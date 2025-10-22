@@ -38,7 +38,7 @@ class Command(BaseCommand):
 
         # Create Statuses
         self.stdout.write('Creating statuses...')
-        statuses = ['Pending', 'In Progress', 'Completed', 'Cancelled', 'On Hold']
+        statuses = ['pending', 'confirmed', 'in_progress', 'under_review', 'completed', 'cancelled']
         status_objects = {}
         for status_name in statuses:
             status = Status.objects.create(name=status_name)
@@ -257,7 +257,7 @@ class Command(BaseCommand):
         order1 = Order.objects.create(
             client=clients[0],
             service=services[0],  # Web Development
-            status=status_objects['Completed'],
+            status=status_objects['completed'],
             collaborator=collaborators[0] if collaborators else None,  # Assign to first collaborator
             deadline_date=timezone.now() + timedelta(days=30),
             total_price=Decimal('5000.00'),
@@ -272,7 +272,7 @@ class Command(BaseCommand):
         order2 = Order.objects.create(
             client=clients[1],
             service=services[1],  # Mobile App
-            status=status_objects['In Progress'],
+            status=status_objects['in_progress'],
             collaborator=collaborators[1] if len(collaborators) > 1 else collaborators[0] if collaborators else None,  # Assign to second collaborator
             deadline_date=timezone.now() + timedelta(days=45),
             total_price=Decimal('8000.00'),
@@ -287,7 +287,7 @@ class Command(BaseCommand):
         order3 = Order.objects.create(
             client=clients[2],
             service=services[2],  # Digital Marketing
-            status=status_objects['Completed'],
+            status=status_objects['completed'],
             collaborator=collaborators[0] if collaborators else None,  # Assign to first collaborator
             deadline_date=timezone.now() + timedelta(days=15),
             total_price=Decimal('3000.00'),
@@ -302,7 +302,7 @@ class Command(BaseCommand):
         order4 = Order.objects.create(
             client=clients[3],
             service=services[3],  # Graphic Design
-            status=status_objects['Pending'],
+            status=status_objects['pending'],
             collaborator=None,  # Unassigned order
             deadline_date=timezone.now() + timedelta(days=20),
             total_price=Decimal('2000.00'),
@@ -316,7 +316,7 @@ class Command(BaseCommand):
         order5 = Order.objects.create(
             client=clients[0],
             service=services[4],  # Video Production
-            status=status_objects['Completed'],
+            status=status_objects['completed'],
             collaborator=collaborators[1] if len(collaborators) > 1 else collaborators[0] if collaborators else None,  # Assign to second collaborator
             deadline_date=timezone.now() + timedelta(days=25),
             total_price=Decimal('4500.00'),

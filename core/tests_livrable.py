@@ -62,8 +62,8 @@ class LivrableAPITestCase(APITestCase):
         )
         
         # Create status
-        self.completed_status = Status.objects.create(name='Completed')
-        self.in_progress_status = Status.objects.create(name='In Progress')
+        self.completed_status = Status.objects.create(name='completed')
+        self.in_progress_status = Status.objects.create(name='in_progress')
         
         # Create order
         self.order = Order.objects.create(

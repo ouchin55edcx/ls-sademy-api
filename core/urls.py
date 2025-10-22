@@ -39,7 +39,8 @@ from core.views import (
     ClientReviewRetrieveUpdateDestroyAPIView,
     LivrableFileDownloadAPIView,
     ProfileUpdateAPIView,
-    AdminStatisticsAPIView
+    AdminStatisticsAPIView,
+    TestEmailAPIView
 )
 
 app_name = 'core'
@@ -83,6 +84,7 @@ urlpatterns = [
     
     # Admin - Statistics (Admin Only)
     path('admin/statistics/', AdminStatisticsAPIView.as_view(), name='admin-statistics'),
+    path('admin/test-email/', TestEmailAPIView.as_view(), name='admin-test-email'),
     
     # Collaborator - Order Management (Collaborator Only)
     path('collaborator/orders/', CollaboratorOrderListAPIView.as_view(), name='collaborator-orders-list'),
