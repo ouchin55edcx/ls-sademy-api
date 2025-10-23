@@ -3,6 +3,7 @@ from core.views import (
     LoginAPIView,
     ActiveServicesListAPIView,
     ServiceDetailAPIView,
+    DemoVideoAPIView,
     AllReviewsListAPIView,
     ReviewStatisticsAPIView,
     AllUsersListAPIView,
@@ -54,6 +55,7 @@ urlpatterns = [
     # Services
     path('services/', ActiveServicesListAPIView.as_view(), name='services-list'),
     path('services/<int:pk>/', ServiceDetailAPIView.as_view(), name='service-detail'),
+    path('demo-video/<int:template_id>/', DemoVideoAPIView.as_view(), name='demo-video'),
     
     # Reviews
     path('reviews/', AllReviewsListAPIView.as_view(), name='reviews-list'),

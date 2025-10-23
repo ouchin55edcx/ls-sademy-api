@@ -39,6 +39,17 @@ class LoginSerializer(serializers.Serializer):
             if not user.is_active:
                 raise serializers.ValidationError('User account is disabled.')
             
+            # Check if client is blacklisted
+            if hasattr(user, 'client_profile') and user.client_profile.is_blacklisted:
+                # Find the blacklist reason from any blacklisted order
+                blacklisted_order = Order.objects.filter(
+                    client=user.client_profile,
+                    is_blacklisted=True
+                ).first()
+                
+                reason = blacklisted_order.blacklist_reason if blacklisted_order else "No reason provided"
+                raise serializers.ValidationError(f'Your account has been blacklisted. Reason: {reason}')
+            
             data['user'] = user
             return data
         else:
@@ -537,6 +548,7 @@ class UserListSerializer(serializers.ModelSerializer):
     role = serializers.SerializerMethodField()
     full_name = serializers.SerializerMethodField()
     is_active_collab = serializers.SerializerMethodField()
+    is_blacklisted = serializers.SerializerMethodField()
     
     class Meta:
         model = User
@@ -551,6 +563,7 @@ class UserListSerializer(serializers.ModelSerializer):
             'role',
             'is_active',
             'is_active_collab',
+            'is_blacklisted',
             'date_joined',
             'last_login'
         ]
@@ -574,6 +587,12 @@ class UserListSerializer(serializers.ModelSerializer):
         """Get collaborator active status (only for collaborators)"""
         if hasattr(obj, 'collaborator_profile'):
             return obj.collaborator_profile.is_active
+        return None
+    
+    def get_is_blacklisted(self, obj):
+        """Get client blacklist status (only for clients)"""
+        if hasattr(obj, 'client_profile'):
+            return obj.client_profile.is_blacklisted
         return None
 
 
@@ -794,10 +813,13 @@ class OrderListSerializer(serializers.ModelSerializer):
     """
     Order list serializer for admin (with all details)
     """
+    client_id = serializers.IntegerField(source='client.id', read_only=True)
     client_name = serializers.SerializerMethodField()
     client_email = serializers.CharField(source='client.user.email', read_only=True)
     client_phone = serializers.CharField(source='client.user.phone', read_only=True)
+    service_id = serializers.IntegerField(source='service.id', read_only=True)
     service_name = serializers.CharField(source='service.name', read_only=True)
+    status_id = serializers.IntegerField(source='status.id', read_only=True)
     status_name = serializers.CharField(source='status.name', read_only=True)
     collaborator_name = serializers.SerializerMethodField()
     remaining_payment = serializers.ReadOnlyField()
@@ -808,10 +830,13 @@ class OrderListSerializer(serializers.ModelSerializer):
         model = Order
         fields = [
             'id',
+            'client_id',
             'client_name',
             'client_email', 
             'client_phone',
+            'service_id',
             'service_name',
+            'status_id',
             'status_name',
             'collaborator_name',
             'date',

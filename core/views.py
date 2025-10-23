@@ -11,7 +11,7 @@ from rest_framework.authtoken.models import Token
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from django.contrib.auth import login, get_user_model
 from django.db import models
-from django.http import HttpResponse, Http404
+from django.http import HttpResponse, Http404, FileResponse
 from django.shortcuts import get_object_or_404
 from django.conf import settings
 import os
@@ -167,6 +167,74 @@ class ServiceDetailAPIView(generics.RetrieveAPIView):
     permission_classes = [AllowAny]
     serializer_class = ServiceDetailSerializer
     queryset = Service.objects.all()
+
+
+class DemoVideoAPIView(APIView):
+    """
+    GET /api/demo-video/{template_id}/
+    Stream demo video for a specific template
+    Public endpoint for visitors
+    
+    Example:
+    GET /api/demo-video/1/
+    
+    Response: Video file stream with appropriate headers
+    """
+    permission_classes = [AllowAny]
+    
+    def get(self, request, template_id):
+        """Stream demo video file"""
+        try:
+            # Get the template
+            template = get_object_or_404(Template, id=template_id)
+            
+            # Check if template has a demo video
+            if not template.demo_video:
+                return Response(
+                    {'error': 'No demo video available for this template'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            # Get the file path
+            file_path = template.demo_video.path
+            
+            # Check if file exists
+            if not os.path.exists(file_path):
+                return Response(
+                    {'error': 'Demo video file not found'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            # Get file extension for content type
+            file_extension = os.path.splitext(file_path)[1].lower()
+            content_types = {
+                '.mp4': 'video/mp4',
+                '.avi': 'video/avi',
+                '.mov': 'video/quicktime',
+                '.webm': 'video/webm',
+                '.mkv': 'video/x-matroska'
+            }
+            
+            content_type = content_types.get(file_extension, 'video/mp4')
+            
+            # Create file response with appropriate headers
+            response = FileResponse(
+                open(file_path, 'rb'),
+                content_type=content_type,
+                as_attachment=False  # Stream the video instead of downloading
+            )
+            
+            # Add headers for video streaming
+            response['Accept-Ranges'] = 'bytes'
+            response['Cache-Control'] = 'public, max-age=3600'  # Cache for 1 hour
+            
+            return response
+            
+        except Exception as e:
+            return Response(
+                {'error': f'Error streaming demo video: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 class AllReviewsListAPIView(generics.ListAPIView):
@@ -814,10 +882,13 @@ class OrderListCreateAPIView(generics.ListCreateAPIView):
     [
         {
             "id": 1,
+            "client_id": 1,
             "client_name": "Youssef Tazi",
             "client_email": "client1@example.com",
             "client_phone": "+212600000004",
+            "service_id": 1,
             "service_name": "Web Development",
+            "status_id": 2,
             "status_name": "in_progress",
             "collaborator_name": "Ahmed Benali",
             "date": "2024-01-15T10:30:00Z",

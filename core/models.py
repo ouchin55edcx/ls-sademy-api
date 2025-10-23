@@ -91,6 +91,10 @@ class Client(models.Model):
         related_name='client_profile'
     )
     city = models.CharField(max_length=100, blank=True)
+    is_blacklisted = models.BooleanField(
+        default=False,
+        help_text="Mark this client as blacklisted"
+    )
 
     class Meta:
         db_table = 'clients'
@@ -134,8 +138,8 @@ class Template(models.Model):
     )
     title = models.CharField(max_length=200)
     description = models.TextField(blank=True)
-    file = models.FileField(upload_to='media/templates/files/', blank=True, null=True, help_text="Template file")
-    demo_video = models.FileField(upload_to='media/templates/demos/', blank=True, null=True, help_text="Demo video file")
+    file = models.FileField(upload_to='templates/files/', blank=True, null=True, help_text="Template file")
+    demo_video = models.FileField(upload_to='templates/demos/', blank=True, null=True, help_text="Demo video file")
 
     class Meta:
         db_table = 'templates'
@@ -546,3 +550,15 @@ def create_status_history_on_status_change(sender, instance, created, **kwargs):
             delattr(instance, '_changed_by_user')
         if hasattr(instance, '_status_change_notes'):
             delattr(instance, '_status_change_notes')
+
+
+@receiver(post_save, sender=Order)
+def blacklist_client_on_order_blacklist(sender, instance, created, **kwargs):
+    """
+    Blacklist client when order is blacklisted
+    """
+    if not created and instance.is_blacklisted:
+        # Check if the client is not already blacklisted
+        if not instance.client.is_blacklisted:
+            instance.client.is_blacklisted = True
+            instance.client.save()
