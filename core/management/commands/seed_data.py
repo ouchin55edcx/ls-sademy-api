@@ -8,7 +8,7 @@ from django.core.management.base import BaseCommand
 from django.contrib.auth import get_user_model
 from core.models import (
     Admin, Collaborator, Client, Service, Template, Status, 
-    Order, Livrable, Review
+    Order, Livrable, Review, Language, Notification
 )
 from decimal import Decimal
 from datetime import datetime, timedelta
@@ -23,27 +23,39 @@ class Command(BaseCommand):
     def handle(self, *args, **kwargs):
         self.stdout.write('Starting database seeding...')
 
-        # Clear existing data (optional - comment out if you don't want to clear)
-        self.stdout.write('Clearing existing data...')
-        Review.objects.all().delete()
-        Livrable.objects.all().delete()
-        Order.objects.all().delete()
-        Status.objects.all().delete()
-        Template.objects.all().delete()
-        Service.objects.all().delete()
-        Client.objects.all().delete()
-        Collaborator.objects.all().delete()
-        Admin.objects.all().delete()
-        User.objects.all().delete()
+        # Skip clearing existing data to avoid foreign key constraints
+        self.stdout.write('Skipping data clearing to avoid foreign key constraints...')
+
+        # Create Languages
+        self.stdout.write('Creating languages...')
+        languages_data = [
+            {'code': 'en', 'name': 'English', 'is_active': True},
+            {'code': 'fr', 'name': 'French', 'is_active': True},
+            {'code': 'ar', 'name': 'Arabic', 'is_active': True},
+            {'code': 'es', 'name': 'Spanish', 'is_active': True},
+        ]
+        
+        for lang_data in languages_data:
+            language, created = Language.objects.get_or_create(
+                code=lang_data['code'],
+                defaults=lang_data
+            )
+            if created:
+                self.stdout.write(f'  ✓ Created language: {language.name}')
+            else:
+                self.stdout.write(f'  ℹ️  Language already exists: {language.name}')
 
         # Create Statuses
         self.stdout.write('Creating statuses...')
         statuses = ['pending', 'confirmed', 'in_progress', 'under_review', 'completed', 'cancelled']
         status_objects = {}
         for status_name in statuses:
-            status = Status.objects.create(name=status_name)
+            status, created = Status.objects.get_or_create(name=status_name)
             status_objects[status_name] = status
-            self.stdout.write(f'  ✓ Created status: {status_name}')
+            if created:
+                self.stdout.write(f'  ✓ Created status: {status_name}')
+            else:
+                self.stdout.write(f'  ℹ️  Status already exists: {status_name}')
 
         # Create Admin Users
         self.stdout.write('Creating admin users...')
@@ -383,35 +395,34 @@ class Command(BaseCommand):
         self.stdout.write('Creating reviews...')
         reviews_data = [
             {
-                'livrable': livrable1,
+                'order': order1,
+                'client': clients[0],
                 'rating': 5,
                 'comment': 'Outstanding work! The website exceeded our expectations. Professional, responsive, and delivered on time.'
             },
             {
-                'livrable': livrable3,
+                'order': order3,
+                'client': clients[2],
                 'rating': 5,
                 'comment': 'The marketing campaign was incredibly successful. We saw a 200% increase in engagement!'
             },
             {
-                'livrable': livrable4,
+                'order': order5,
+                'client': clients[0],
                 'rating': 4,
                 'comment': 'Great video quality and creative direction. Minor revisions needed but overall excellent work.'
             },
             {
-                'livrable': livrable5,
+                'order': order1,
+                'client': clients[0],
                 'rating': 5,
                 'comment': 'Very detailed documentation. Makes it easy to maintain the website.'
-            },
-            {
-                'livrable': livrable1,
-                'rating': 5,
-                'comment': 'Second review: After using the site for a month, we are very satisfied. Great support too!'
             },
         ]
         
         for review_data in reviews_data:
             Review.objects.create(**review_data)
-            self.stdout.write(f"  ✓ Created review for {review_data['livrable'].name} - {review_data['rating']} stars")
+            self.stdout.write(f"  ✓ Created review for Order #{review_data['order'].id} - {review_data['rating']} stars")
 
         # Summary
         self.stdout.write(self.style.SUCCESS('\n' + '='*50))
@@ -422,6 +433,7 @@ class Command(BaseCommand):
         self.stdout.write(f'  • {Admin.objects.count()} Admins')
         self.stdout.write(f'  • {Collaborator.objects.count()} Collaborators')
         self.stdout.write(f'  • {Client.objects.count()} Clients')
+        self.stdout.write(f'  • {Language.objects.count()} Languages')
         self.stdout.write(f'  • {Service.objects.count()} Services ({Service.objects.filter(is_active=True).count()} active)')
         self.stdout.write(f'  • {Template.objects.count()} Templates')
         self.stdout.write(f'  • {Status.objects.count()} Statuses')
