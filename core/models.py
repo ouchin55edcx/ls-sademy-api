@@ -115,6 +115,7 @@ class Service(models.Model):
     tool_name = models.CharField(max_length=100, blank=True)
     audio_file = models.FileField(upload_to='media/services/audio/', blank=True, null=True)
     file_audio = models.FileField(upload_to='media/', blank=True, null=True, help_text="Audio file for the service")
+    created_date = models.DateTimeField(auto_now_add=True, help_text="Date when the service was created")
 
     class Meta:
         db_table = 'services'
@@ -494,6 +495,122 @@ class Review(models.Model):
         return time_diff <= timedelta(hours=24)
 
 
+class Notification(models.Model):
+    """
+    Notification model for in-app and email notifications
+    """
+    NOTIFICATION_TYPES = [
+        ('order_assigned', 'Order Assigned'),
+        ('order_status_changed', 'Order Status Changed'),
+        ('order_cancelled', 'Order Cancelled'),
+        ('livrable_uploaded', 'Deliverable Uploaded'),
+        ('livrable_reviewed', 'Deliverable Reviewed'),
+        ('livrable_accepted', 'Deliverable Accepted'),
+        ('livrable_rejected', 'Deliverable Rejected'),
+        ('payment_reminder', 'Payment Reminder'),
+        ('deadline_reminder', 'Deadline Reminder'),
+        ('order_completed', 'Order Completed'),
+        ('review_reminder', 'Review Reminder'),
+        ('system_alert', 'System Alert'),
+        ('account_created', 'Account Created'),
+        ('user_blacklisted', 'User Blacklisted'),
+    ]
+    
+    PRIORITY_LEVELS = [
+        ('low', 'Low'),
+        ('medium', 'Medium'),
+        ('high', 'High'),
+        ('urgent', 'Urgent'),
+    ]
+    
+    user = models.ForeignKey(
+        User, 
+        on_delete=models.CASCADE, 
+        related_name='notifications',
+        help_text="User who will receive the notification"
+    )
+    notification_type = models.CharField(
+        max_length=50, 
+        choices=NOTIFICATION_TYPES,
+        help_text="Type of notification"
+    )
+    title = models.CharField(
+        max_length=200,
+        help_text="Notification title"
+    )
+    message = models.TextField(
+        help_text="Notification message content"
+    )
+    priority = models.CharField(
+        max_length=10, 
+        choices=PRIORITY_LEVELS, 
+        default='medium',
+        help_text="Notification priority level"
+    )
+    is_read = models.BooleanField(
+        default=False,
+        help_text="Whether the notification has been read"
+    )
+    is_email_sent = models.BooleanField(
+        default=False,
+        help_text="Whether email notification was sent"
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text="When the notification was created"
+    )
+    read_at = models.DateTimeField(
+        null=True, 
+        blank=True,
+        help_text="When the notification was read"
+    )
+    
+    # Optional related objects
+    order = models.ForeignKey(
+        Order, 
+        on_delete=models.CASCADE, 
+        null=True, 
+        blank=True,
+        related_name='notifications',
+        help_text="Related order (if applicable)"
+    )
+    livrable = models.ForeignKey(
+        Livrable, 
+        on_delete=models.CASCADE, 
+        null=True, 
+        blank=True,
+        related_name='notifications',
+        help_text="Related deliverable (if applicable)"
+    )
+    
+    class Meta:
+        db_table = 'notifications'
+        verbose_name = 'Notification'
+        verbose_name_plural = 'Notifications'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', 'is_read']),
+            models.Index(fields=['notification_type']),
+            models.Index(fields=['created_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.title} - {self.user.username} ({'Read' if self.is_read else 'Unread'})"
+    
+    def mark_as_read(self):
+        """Mark notification as read"""
+        from django.utils import timezone
+        self.is_read = True
+        self.read_at = timezone.now()
+        self.save()
+    
+    def mark_as_unread(self):
+        """Mark notification as unread"""
+        self.is_read = False
+        self.read_at = None
+        self.save()
+
+
 # Signal handlers for automatic status history tracking
 @receiver(post_save, sender=Order)
 def create_status_history_on_order_creation(sender, instance, created, **kwargs):
@@ -562,3 +679,49 @@ def blacklist_client_on_order_blacklist(sender, instance, created, **kwargs):
         if not instance.client.is_blacklisted:
             instance.client.is_blacklisted = True
             instance.client.save()
+
+
+# Notification signal handlers
+@receiver(post_save, sender=Order)
+def notify_order_status_change(sender, instance, created, **kwargs):
+    """Send notifications when order status changes"""
+    if not created and hasattr(instance, '_status_changed') and instance._status_changed:
+        old_status = getattr(instance, '_old_status', None)
+        if old_status and old_status != instance.status:
+            from core.notification_service import NotificationService
+            NotificationService.notify_order_status_change(
+                instance, old_status, instance.status, 
+                getattr(instance, '_changed_by_user', None)
+            )
+
+
+@receiver(post_save, sender=Livrable)
+def notify_livrable_uploaded(sender, instance, created, **kwargs):
+    """Notify client when collaborator uploads deliverable"""
+    if created and instance.order.client:
+        from core.notification_service import NotificationService
+        NotificationService.notify_livrable_uploaded(instance)
+
+
+@receiver(post_save, sender=Livrable)
+def notify_livrable_reviewed(sender, instance, created, **kwargs):
+    """Notify client when admin reviews deliverable"""
+    if not created and instance.is_reviewed_by_admin:
+        from core.notification_service import NotificationService
+        NotificationService.notify_livrable_reviewed(instance)
+
+
+@receiver(post_save, sender=Livrable)
+def notify_livrable_accepted(sender, instance, created, **kwargs):
+    """Notify collaborator when client accepts deliverable"""
+    if not created and instance.is_accepted:
+        from core.notification_service import NotificationService
+        NotificationService.notify_livrable_accepted(instance)
+
+
+@receiver(post_save, sender=Order)
+def notify_order_completed(sender, instance, created, **kwargs):
+    """Notify users when order is completed"""
+    if not created and instance.status.name.lower() == 'completed':
+        from core.notification_service import NotificationService
+        NotificationService.notify_order_completed(instance)

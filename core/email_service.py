@@ -183,6 +183,51 @@ class EmailService:
             return False
     
     @staticmethod
+    def send_collaborator_account_created_email(user, password):
+        """
+        Send email notification to new collaborator with login credentials
+        
+        Args:
+            user: User instance
+            password: Generated password for the user
+        """
+        try:
+            # Prepare email context
+            context = {
+                'user': user,
+                'password': password,
+            }
+            
+            # Render HTML template
+            html_content = render_to_string('emails/collaborator_account_created.html', context)
+            
+            # Create plain text version
+            text_content = strip_tags(html_content)
+            
+            # Create email
+            subject = f"Welcome to Sademiy - Your Collaborator Account Has Been Created"
+            from_email = settings.EMAIL_FROM
+            to_email = [user.email]
+            
+            # Create email message
+            msg = EmailMultiAlternatives(
+                subject=subject,
+                body=text_content,
+                from_email=from_email,
+                to=to_email
+            )
+            msg.attach_alternative(html_content, "text/html")
+            
+            # Send email
+            msg.send()
+            logger.info(f"Collaborator account creation email sent successfully to {user.email}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to send collaborator account creation email: {str(e)}")
+            return False
+    
+    @staticmethod
     def send_test_email(to_email, subject="Test Email", message="This is a test email"):
         """
         Send a simple test email
@@ -209,3 +254,93 @@ class EmailService:
         except Exception as e:
             logger.error(f"Failed to send test email: {str(e)}")
             return False
+    
+    @staticmethod
+    def send_notification_email(notification):
+        """
+        Send email notification based on notification type
+        
+        Args:
+            notification: Notification instance
+        """
+        try:
+            context = EmailService._prepare_email_context(notification)
+            template_name = EmailService._get_template_name(notification.notification_type)
+            
+            html_content = render_to_string(f'emails/{template_name}', context)
+            text_content = strip_tags(html_content)
+            
+            msg = EmailMultiAlternatives(
+                subject=notification.title,
+                body=text_content,
+                from_email=settings.EMAIL_FROM,
+                to=[notification.user.email]
+            )
+            msg.attach_alternative(html_content, "text/html")
+            msg.send()
+            
+            notification.is_email_sent = True
+            notification.save()
+            
+            logger.info(f"Notification email sent successfully to {notification.user.email} for {notification.notification_type}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to send notification email: {str(e)}")
+            return False
+    
+    @staticmethod
+    def _prepare_email_context(notification):
+        """
+        Prepare context for email templates
+        
+        Args:
+            notification: Notification instance
+        """
+        context = {
+            'notification': notification,
+            'user': notification.user,
+        }
+        
+        if notification.order:
+            context.update({
+                'order': notification.order,
+                'client': notification.order.client,
+                'service': notification.order.service,
+                'collaborator': notification.order.collaborator,
+                'status': notification.order.status,
+                'deadline_date': notification.order.deadline_date,
+                'total_price': notification.order.total_price,
+                'advance_payment': notification.order.advance_payment,
+                'remaining_payment': notification.order.remaining_payment,
+            })
+        
+        if notification.livrable:
+            context['livrable'] = notification.livrable
+            
+        return context
+    
+    @staticmethod
+    def _get_template_name(notification_type):
+        """
+        Map notification types to email templates
+        
+        Args:
+            notification_type: Type of notification
+        """
+        template_mapping = {
+            'order_assigned': 'order_assignment.html',
+            'order_status_changed': 'order_status_changed.html',
+            'order_cancelled': 'order_cancellation.html',
+            'livrable_uploaded': 'livrable_uploaded.html',
+            'livrable_reviewed': 'livrable_reviewed.html',
+            'livrable_accepted': 'livrable_accepted.html',
+            'livrable_rejected': 'livrable_rejected.html',
+            'payment_reminder': 'payment_reminder.html',
+            'deadline_reminder': 'deadline_reminder.html',
+            'order_completed': 'order_completed.html',
+            'review_reminder': 'review_reminder.html',
+            'account_created': 'collaborator_account_created.html',
+            'user_blacklisted': 'user_blacklisted.html',
+        }
+        return template_mapping.get(notification_type, 'generic_notification.html')

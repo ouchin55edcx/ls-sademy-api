@@ -5,7 +5,7 @@ Place this file in: core/serializers.py
 
 from rest_framework import serializers
 from django.contrib.auth import get_user_model, authenticate
-from core.models import Service, Review, Livrable, Order, Client, Template, Collaborator, Admin, Status, OrderStatusHistory, GlobalSettings
+from core.models import Service, Review, Livrable, Order, Client, Template, Collaborator, Admin, Status, OrderStatusHistory, GlobalSettings, Notification
 
 User = get_user_model()
 
@@ -254,6 +254,7 @@ class ServiceListSerializer(serializers.ModelSerializer):
             'is_active',
             'audio_file',
             'file_audio',
+            'created_date',
             'templates_count',
             'reviews_count',
             'average_rating'
@@ -486,6 +487,7 @@ class ServiceDetailSerializer(serializers.ModelSerializer):
             'is_active',
             'audio_file',
             'file_audio',
+            'created_date',
             'templates',
             'reviews_count',
             'average_rating',
@@ -659,6 +661,63 @@ class CreateCollaboratorSerializer(serializers.ModelSerializer):
         return user
 
 
+class CreateCollaboratorAdminSerializer(serializers.ModelSerializer):
+    """
+    Serializer for creating new collaborators by admin with auto-generated password
+    """
+    
+    class Meta:
+        model = User
+        fields = [
+            'username',
+            'email',
+            'first_name',
+            'last_name',
+            'phone'
+        ]
+    
+    def validate_username(self, value):
+        """Check if username already exists"""
+        if User.objects.filter(username=value).exists():
+            raise serializers.ValidationError('Username already exists.')
+        return value
+    
+    def validate_email(self, value):
+        """Check if email already exists"""
+        if User.objects.filter(email=value).exists():
+            raise serializers.ValidationError('Email already exists.')
+        return value
+    
+    def validate_phone(self, value):
+        """Check if phone already exists (if provided)"""
+        if value and User.objects.filter(phone=value).exists():
+            raise serializers.ValidationError('Phone number already exists.')
+        return value
+    
+    def create(self, validated_data):
+        """Create user and collaborator profile with auto-generated password"""
+        import secrets
+        import string
+        
+        # Generate a secure random password
+        alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
+        password = ''.join(secrets.choice(alphabet) for _ in range(12))
+        
+        # Create user
+        user = User.objects.create_user(
+            password=password,
+            **validated_data
+        )
+        
+        # Create collaborator profile
+        collaborator = Collaborator.objects.create(user=user, is_active=True)
+        
+        # Store the generated password in the user instance for email sending
+        user._generated_password = password
+        
+        return user
+
+
 class DeactivateUserSerializer(serializers.Serializer):
     """
     Serializer for deactivating/activating a user (admin only)
@@ -733,6 +792,7 @@ class ServiceAdminListSerializer(serializers.ModelSerializer):
             'is_active',
             'audio_file',
             'file_audio',
+            'created_date',
             'templates_count',
             'orders_count',
             'reviews_count',
@@ -1175,3 +1235,122 @@ class ProfileUpdateSerializer(serializers.ModelSerializer):
         if value and User.objects.filter(phone=value).exclude(pk=self.instance.pk).exists():
             raise serializers.ValidationError('A user with this phone number already exists.')
         return value
+
+
+# Notification Serializers
+
+class NotificationSerializer(serializers.ModelSerializer):
+    """
+    Serializer for notifications
+    """
+    order_id = serializers.IntegerField(source='order.id', read_only=True)
+    order_title = serializers.CharField(source='order.service.name', read_only=True)
+    livrable_id = serializers.IntegerField(source='livrable.id', read_only=True)
+    livrable_name = serializers.CharField(source='livrable.name', read_only=True)
+    time_ago = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Notification
+        fields = [
+            'id',
+            'notification_type',
+            'title',
+            'message',
+            'priority',
+            'is_read',
+            'is_email_sent',
+            'created_at',
+            'read_at',
+            'order_id',
+            'order_title',
+            'livrable_id',
+            'livrable_name',
+            'time_ago'
+        ]
+        read_only_fields = ['created_at', 'read_at', 'is_email_sent']
+    
+    def get_time_ago(self, obj):
+        """Get human-readable time ago"""
+        from django.utils import timezone
+        from datetime import timedelta
+        
+        now = timezone.now()
+        diff = now - obj.created_at
+        
+        if diff.days > 0:
+            return f"{diff.days} day{'s' if diff.days > 1 else ''} ago"
+        elif diff.seconds > 3600:
+            hours = diff.seconds // 3600
+            return f"{hours} hour{'s' if hours > 1 else ''} ago"
+        elif diff.seconds > 60:
+            minutes = diff.seconds // 60
+            return f"{minutes} minute{'s' if minutes > 1 else ''} ago"
+        else:
+            return "Just now"
+
+
+class NotificationListSerializer(serializers.ModelSerializer):
+    """
+    Serializer for listing notifications with minimal data
+    """
+    time_ago = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Notification
+        fields = [
+            'id',
+            'notification_type',
+            'title',
+            'priority',
+            'is_read',
+            'created_at',
+            'time_ago'
+        ]
+    
+    def get_time_ago(self, obj):
+        """Get human-readable time ago"""
+        from django.utils import timezone
+        from datetime import timedelta
+        
+        now = timezone.now()
+        diff = now - obj.created_at
+        
+        if diff.days > 0:
+            return f"{diff.days} day{'s' if diff.days > 1 else ''} ago"
+        elif diff.seconds > 3600:
+            hours = diff.seconds // 3600
+            return f"{hours} hour{'s' if hours > 1 else ''} ago"
+        elif diff.seconds > 60:
+            minutes = diff.seconds // 60
+            return f"{minutes} minute{'s' if minutes > 1 else ''} ago"
+        else:
+            return "Just now"
+
+
+class NotificationMarkReadSerializer(serializers.Serializer):
+    """
+    Serializer for marking notifications as read
+    """
+    is_read = serializers.BooleanField()
+    
+    def update(self, instance, validated_data):
+        """Update notification read status"""
+        is_read = validated_data.get('is_read', False)
+        
+        if is_read:
+            instance.mark_as_read()
+        else:
+            instance.mark_as_unread()
+        
+        return instance
+
+
+class NotificationStatsSerializer(serializers.Serializer):
+    """
+    Serializer for notification statistics
+    """
+    total = serializers.IntegerField()
+    unread = serializers.IntegerField()
+    read = serializers.IntegerField()
+    unread_by_type = serializers.DictField()
+    recent_notifications = NotificationListSerializer(many=True)

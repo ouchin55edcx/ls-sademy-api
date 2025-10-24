@@ -43,7 +43,13 @@ from core.views import (
     ProfileUpdateAPIView,
     AdminStatisticsAPIView,
     TestEmailAPIView,
-    GlobalSettingsRetrieveUpdateAPIView
+    GlobalSettingsRetrieveUpdateAPIView,
+    NotificationListAPIView,
+    NotificationRetrieveAPIView,
+    NotificationMarkReadAPIView,
+    NotificationMarkAllReadAPIView,
+    NotificationStatsAPIView,
+    NotificationDeleteAPIView
 )
 
 app_name = 'core'
@@ -130,4 +136,12 @@ urlpatterns = [
     
     # Profile Update (All authenticated users)
     path('profile/update/', ProfileUpdateAPIView.as_view(), name='profile-update'),
+    
+    # Notifications (All authenticated users)
+    path('notifications/', NotificationListAPIView.as_view(), name='notifications-list'),
+    path('notifications/<int:pk>/', NotificationRetrieveAPIView.as_view(), name='notification-detail'),
+    path('notifications/<int:pk>/mark-read/', NotificationMarkReadAPIView.as_view(), name='notification-mark-read'),
+    path('notifications/mark-all-read/', NotificationMarkAllReadAPIView.as_view(), name='notifications-mark-all-read'),
+    path('notifications/stats/', NotificationStatsAPIView.as_view(), name='notifications-stats'),
+    path('notifications/<int:pk>/delete/', NotificationDeleteAPIView.as_view(), name='notification-delete'),
 ]

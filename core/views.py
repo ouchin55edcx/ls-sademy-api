@@ -19,7 +19,7 @@ from core.models import Service, Review, Template, Order, Status, Collaborator, 
 from core.serializers import (
     LoginSerializer, UserSerializer, ServiceListSerializer,
     ServiceDetailSerializer, AllReviewsSerializer, ReviewSerializer, ReviewCreateUpdateSerializer,
-    UserListSerializer, CreateCollaboratorSerializer, DeactivateUserSerializer,
+    UserListSerializer, CreateCollaboratorSerializer, CreateCollaboratorAdminSerializer, DeactivateUserSerializer,
     ServiceCreateUpdateSerializer, ServiceAdminListSerializer, ServiceToggleActiveSerializer,
     TemplateSerializer, TemplateCreateUpdateSerializer,
     OrderListSerializer, OrderCreateUpdateSerializer, OrderDetailSerializer,
@@ -27,7 +27,8 @@ from core.serializers import (
     StatusSerializer, ActiveCollaboratorListSerializer, OrderStatusHistorySerializer,
     LivrableCreateUpdateSerializer, LivrableListSerializer, LivrableDetailSerializer,
     LivrableAcceptRejectSerializer, LivrableAdminReviewSerializer, ProfileUpdateSerializer,
-    GlobalSettingsSerializer
+    GlobalSettingsSerializer, NotificationSerializer, NotificationListSerializer, 
+    NotificationMarkReadSerializer, NotificationStatsSerializer
 )
 from core.permissions import IsAdminUser, IsCollaboratorUser, IsClientUser, IsAdminOrCollaboratorUser
 from core.email_service import EmailService
@@ -364,11 +365,16 @@ class AllUsersListAPIView(generics.ListAPIView):
     
     Query parameters:
     - role: Filter by role (admin, collaborator, client)
+    - status: Filter by status (active, inactive, blacklisted)
     
     Examples:
     - GET /api/admin/users/ - Get all users
     - GET /api/admin/users/?role=collaborator - Get all collaborators
     - GET /api/admin/users/?role=client - Get all clients
+    - GET /api/admin/users/?status=active - Get all active users
+    - GET /api/admin/users/?status=inactive - Get all inactive users
+    - GET /api/admin/users/?status=blacklisted - Get all blacklisted clients
+    - GET /api/admin/users/?role=collaborator&status=active - Get active collaborators
     
     Response:
     [
@@ -408,13 +414,23 @@ class AllUsersListAPIView(generics.ListAPIView):
             elif role == 'client':
                 queryset = queryset.filter(client_profile__isnull=False)
         
+        # Filter by status if provided
+        status = self.request.query_params.get('status', None)
+        if status:
+            if status == 'active':
+                queryset = queryset.filter(is_active=True)
+            elif status == 'inactive':
+                queryset = queryset.filter(is_active=False)
+            elif status == 'blacklisted':
+                queryset = queryset.filter(client_profile__is_blacklisted=True)
+        
         return queryset
 
 
 class CreateCollaboratorAPIView(generics.CreateAPIView):
     """
     POST /api/admin/collaborators/
-    Create a new collaborator (admin only)
+    Create a new collaborator with auto-generated password (admin only)
     
     Request body:
     {
@@ -422,9 +438,7 @@ class CreateCollaboratorAPIView(generics.CreateAPIView):
         "email": "newcollab@sademiy.com",
         "first_name": "Hassan",
         "last_name": "Alami",
-        "phone": "+212600000010",
-        "password": "securePassword123",
-        "confirm_password": "securePassword123"
+        "phone": "+212600000010"
     }
     
     Response:
@@ -436,22 +450,33 @@ class CreateCollaboratorAPIView(generics.CreateAPIView):
         "last_name": "Alami",
         "phone": "+212600000010",
         "role": "collaborator",
-        "role_id": 5
+        "role_id": 5,
+        "email_sent": true
     }
     """
     permission_classes = [IsAuthenticated, IsAdminUser]
-    serializer_class = CreateCollaboratorSerializer
+    serializer_class = CreateCollaboratorAdminSerializer
     
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
         
-        # Return user data with role information
-        return Response(
-            UserSerializer(user).data,
-            status=status.HTTP_201_CREATED
-        )
+        # Send email with login credentials
+        email_sent = False
+        if hasattr(user, '_generated_password'):
+            try:
+                email_sent = EmailService.send_collaborator_account_created_email(
+                    user, user._generated_password
+                )
+            except Exception as e:
+                logging.error(f"Failed to send collaborator account creation email: {str(e)}")
+        
+        # Return user data with role information and email status
+        response_data = UserSerializer(user).data
+        response_data['email_sent'] = email_sent
+        
+        return Response(response_data, status=status.HTTP_201_CREATED)
 
 
 class DeactivateUserAPIView(APIView):
@@ -2586,3 +2611,253 @@ class GlobalSettingsRetrieveUpdateAPIView(generics.RetrieveUpdateAPIView):
         self.perform_update(serializer)
         
         return Response(serializer.data)
+
+
+# ==================== NOTIFICATION ENDPOINTS ====================
+
+class NotificationListAPIView(generics.ListAPIView):
+    """
+    GET /api/notifications/
+    
+    List notifications for the authenticated user
+    
+    Query parameters:
+    - unread_only: Filter only unread notifications (true/false)
+    - notification_type: Filter by notification type
+    - priority: Filter by priority level
+    - limit: Limit number of results
+    
+    Response:
+    [
+        {
+            "id": 1,
+            "notification_type": "order_assigned",
+            "title": "New Order Assignment - Order #123",
+            "message": "You have been assigned to a new order...",
+            "priority": "medium",
+            "is_read": false,
+            "is_email_sent": true,
+            "created_at": "2024-01-15T10:30:00Z",
+            "read_at": null,
+            "order_id": 123,
+            "order_title": "Web Development",
+            "livrable_id": null,
+            "livrable_name": null,
+            "time_ago": "2 hours ago"
+        }
+    ]
+    """
+    permission_classes = [IsAuthenticated]
+    serializer_class = NotificationSerializer
+    
+    def get_queryset(self):
+        """Return notifications for the authenticated user"""
+        from core.models import Notification
+        
+        queryset = Notification.objects.filter(user=self.request.user)
+        
+        # Filter by unread only
+        unread_only = self.request.query_params.get('unread_only', None)
+        if unread_only is not None:
+            unread_bool = unread_only.lower() == 'true'
+            queryset = queryset.filter(is_read=not unread_bool)
+        
+        # Filter by notification type
+        notification_type = self.request.query_params.get('notification_type', None)
+        if notification_type:
+            queryset = queryset.filter(notification_type=notification_type)
+        
+        # Filter by priority
+        priority = self.request.query_params.get('priority', None)
+        if priority:
+            queryset = queryset.filter(priority=priority)
+        
+        # Limit results
+        limit = self.request.query_params.get('limit', None)
+        if limit:
+            try:
+                limit = int(limit)
+                queryset = queryset[:limit]
+            except ValueError:
+                pass
+        
+        return queryset
+
+
+class NotificationRetrieveAPIView(generics.RetrieveAPIView):
+    """
+    GET /api/notifications/{id}/
+    
+    Retrieve a specific notification
+    """
+    permission_classes = [IsAuthenticated]
+    serializer_class = NotificationSerializer
+    
+    def get_queryset(self):
+        """Return notifications for the authenticated user"""
+        from core.models import Notification
+        return Notification.objects.filter(user=self.request.user)
+
+
+class NotificationMarkReadAPIView(generics.UpdateAPIView):
+    """
+    PATCH /api/notifications/{id}/mark-read/
+    
+    Mark a notification as read or unread
+    
+    Request body:
+    {
+        "is_read": true
+    }
+    
+    Response:
+    {
+        "message": "Notification marked as read",
+        "notification": {
+            "id": 1,
+            "is_read": true,
+            "read_at": "2024-01-15T10:30:00Z"
+        }
+    }
+    """
+    permission_classes = [IsAuthenticated]
+    serializer_class = NotificationMarkReadSerializer
+    
+    def get_queryset(self):
+        """Return notifications for the authenticated user"""
+        from core.models import Notification
+        return Notification.objects.filter(user=self.request.user)
+    
+    def update(self, request, *args, **kwargs):
+        """Mark notification as read/unread"""
+        notification = self.get_object()
+        serializer = self.get_serializer(notification, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        updated_notification = serializer.save()
+        
+        status = "read" if updated_notification.is_read else "unread"
+        
+        return Response({
+            'message': f'Notification marked as {status}',
+            'notification': {
+                'id': updated_notification.id,
+                'is_read': updated_notification.is_read,
+                'read_at': updated_notification.read_at
+            }
+        })
+
+
+class NotificationMarkAllReadAPIView(APIView):
+    """
+    POST /api/notifications/mark-all-read/
+    
+    Mark all notifications as read for the authenticated user
+    
+    Response:
+    {
+        "message": "All notifications marked as read",
+        "updated_count": 5
+    }
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        """Mark all notifications as read"""
+        from core.notification_service import NotificationService
+        
+        updated_count = NotificationService.mark_all_notifications_as_read(request.user)
+        
+        return Response({
+            'message': 'All notifications marked as read',
+            'updated_count': updated_count
+        })
+
+
+class NotificationStatsAPIView(APIView):
+    """
+    GET /api/notifications/stats/
+    
+    Get notification statistics for the authenticated user
+    
+    Response:
+    {
+        "total": 25,
+        "unread": 5,
+        "read": 20,
+        "unread_by_type": {
+            "order_assigned": 2,
+            "order_status_changed": 1,
+            "livrable_uploaded": 2
+        },
+        "recent_notifications": [
+            {
+                "id": 1,
+                "notification_type": "order_assigned",
+                "title": "New Order Assignment",
+                "priority": "medium",
+                "is_read": false,
+                "created_at": "2024-01-15T10:30:00Z",
+                "time_ago": "2 hours ago"
+            }
+        ]
+    }
+    """
+    permission_classes = [IsAuthenticated]
+    serializer_class = NotificationStatsSerializer
+    
+    def get(self, request):
+        """Get notification statistics"""
+        from core.models import Notification
+        from core.notification_service import NotificationService
+        from django.db.models import Count
+        
+        # Get basic stats
+        stats = NotificationService.get_notification_stats(request.user)
+        
+        # Get unread notifications by type
+        unread_by_type = Notification.objects.filter(
+            user=request.user, 
+            is_read=False
+        ).values('notification_type').annotate(
+            count=Count('id')
+        ).order_by('notification_type')
+        
+        unread_by_type_dict = {item['notification_type']: item['count'] for item in unread_by_type}
+        
+        # Get recent notifications (last 5)
+        recent_notifications = Notification.objects.filter(
+            user=request.user
+        ).order_by('-created_at')[:5]
+        
+        recent_serializer = NotificationListSerializer(recent_notifications, many=True)
+        
+        return Response({
+            'total': stats['total'],
+            'unread': stats['unread'],
+            'read': stats['read'],
+            'unread_by_type': unread_by_type_dict,
+            'recent_notifications': recent_serializer.data
+        })
+
+
+class NotificationDeleteAPIView(generics.DestroyAPIView):
+    """
+    DELETE /api/notifications/{id}/
+    
+    Delete a specific notification
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        """Return notifications for the authenticated user"""
+        from core.models import Notification
+        return Notification.objects.filter(user=self.request.user)
+    
+    def destroy(self, request, *args, **kwargs):
+        """Delete notification"""
+        notification = self.get_object()
+        notification.delete()
+        
+        return Response({
+            'message': 'Notification deleted successfully'
+        }, status=status.HTTP_200_OK)
