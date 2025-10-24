@@ -1,4 +1,9 @@
 from django.urls import path
+from rest_framework_simplejwt.views import (
+    TokenObtainPairView,
+    TokenRefreshView,
+    TokenVerifyView,
+)
 from core.views import (
     LoginAPIView,
     ActiveServicesListAPIView,
@@ -49,7 +54,17 @@ from core.views import (
     NotificationMarkReadAPIView,
     NotificationMarkAllReadAPIView,
     NotificationStatsAPIView,
-    NotificationDeleteAPIView
+    NotificationDeleteAPIView,
+    # Chatbot Views
+    ChatbotLanguageListAPIView,
+    ChatbotServiceListAPIView,
+    ChatbotServiceDetailAPIView,
+    ChatbotTemplateListAPIView,
+    ChatbotSessionCreateAPIView,
+    ChatbotSessionUpdateAPIView,
+    ChatbotClientRegistrationAPIView,
+    ChatbotOrderReviewAPIView,
+    ChatbotOrderConfirmationAPIView
 )
 
 app_name = 'core'
@@ -57,6 +72,11 @@ app_name = 'core'
 urlpatterns = [
     # Authentication
     path('login/', LoginAPIView.as_view(), name='login'),
+    
+    # JWT Token endpoints
+    path('token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
+    path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    path('token/verify/', TokenVerifyView.as_view(), name='token_verify'),
     
     # Services
     path('services/', ActiveServicesListAPIView.as_view(), name='services-list'),
@@ -144,4 +164,15 @@ urlpatterns = [
     path('notifications/mark-all-read/', NotificationMarkAllReadAPIView.as_view(), name='notifications-mark-all-read'),
     path('notifications/stats/', NotificationStatsAPIView.as_view(), name='notifications-stats'),
     path('notifications/<int:pk>/delete/', NotificationDeleteAPIView.as_view(), name='notification-delete'),
+    
+    # Chatbot Workflow (Public endpoints)
+    path('chatbot/language/', ChatbotLanguageListAPIView.as_view(), name='chatbot-language-list'),
+    path('chatbot/session/', ChatbotSessionCreateAPIView.as_view(), name='chatbot-session-create'),
+    path('chatbot/session/<str:session_id>/', ChatbotSessionUpdateAPIView.as_view(), name='chatbot-session-update'),
+    path('chatbot/register/', ChatbotClientRegistrationAPIView.as_view(), name='chatbot-client-registration'),
+    path('chatbot/confirm/', ChatbotOrderConfirmationAPIView.as_view(), name='chatbot-order-confirmation'),
+    path('orders/review/', ChatbotOrderReviewAPIView.as_view(), name='chatbot-order-review'),
+    
+    # Services and Templates for Chatbot (Public endpoints)
+    path('templates/', ChatbotTemplateListAPIView.as_view(), name='chatbot-templates-list'),
 ]

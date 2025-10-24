@@ -5,7 +5,7 @@ Place this file in: core/serializers.py
 
 from rest_framework import serializers
 from django.contrib.auth import get_user_model, authenticate
-from core.models import Service, Review, Livrable, Order, Client, Template, Collaborator, Admin, Status, OrderStatusHistory, GlobalSettings, Notification
+from core.models import Service, Review, Livrable, Order, Client, Template, Collaborator, Admin, Status, OrderStatusHistory, GlobalSettings, Notification, Language, ChatbotSession
 
 User = get_user_model()
 
@@ -1354,3 +1354,139 @@ class NotificationStatsSerializer(serializers.Serializer):
     read = serializers.IntegerField()
     unread_by_type = serializers.DictField()
     recent_notifications = NotificationListSerializer(many=True)
+
+
+# Chatbot Workflow Serializers
+
+class LanguageSerializer(serializers.ModelSerializer):
+    """
+    Serializer for language selection
+    """
+    class Meta:
+        model = Language
+        fields = ['id', 'code', 'name', 'is_active']
+
+
+class ChatbotSessionSerializer(serializers.ModelSerializer):
+    """
+    Serializer for chatbot session
+    """
+    language_name = serializers.CharField(source='language.name', read_only=True)
+    service_name = serializers.CharField(source='selected_service.name', read_only=True)
+    template_title = serializers.CharField(source='selected_template.title', read_only=True)
+    
+    class Meta:
+        model = ChatbotSession
+        fields = [
+            'id', 'session_id', 'language', 'language_name', 'selected_service', 
+            'service_name', 'selected_template', 'template_title', 'custom_description',
+            'client_name', 'client_email', 'client_phone', 'is_completed',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'session_id', 'created_at', 'updated_at']
+
+
+class ChatbotSessionCreateSerializer(serializers.ModelSerializer):
+    """
+    Serializer for creating chatbot session
+    """
+    class Meta:
+        model = ChatbotSession
+        fields = ['language', 'selected_service', 'selected_template', 'custom_description',
+                 'client_name', 'client_email', 'client_phone']
+    
+    def create(self, validated_data):
+        """Create session with auto-generated session_id"""
+        import uuid
+        session_id = str(uuid.uuid4())
+        validated_data['session_id'] = session_id
+        return super().create(validated_data)
+
+
+class ChatbotSessionUpdateSerializer(serializers.ModelSerializer):
+    """
+    Serializer for updating chatbot session
+    """
+    class Meta:
+        model = ChatbotSession
+        fields = ['language', 'selected_service', 'selected_template', 'custom_description',
+                 'client_name', 'client_email', 'client_phone', 'is_completed']
+
+
+class ChatbotClientRegistrationSerializer(serializers.Serializer):
+    """
+    Serializer for chatbot client registration
+    """
+    session_id = serializers.CharField()
+    name = serializers.CharField(max_length=200)
+    email = serializers.EmailField()
+    phone = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    
+    def validate_session_id(self, value):
+        """Validate that session exists and is not completed"""
+        try:
+            session = ChatbotSession.objects.get(session_id=value)
+            if session.is_completed:
+                raise serializers.ValidationError('Session is already completed.')
+        except ChatbotSession.DoesNotExist:
+            raise serializers.ValidationError('Invalid session ID.')
+        return value
+    
+    def validate_email(self, value):
+        """Check if email already exists"""
+        if User.objects.filter(email=value).exists():
+            raise serializers.ValidationError('A user with this email already exists.')
+        return value
+
+
+class ChatbotOrderReviewSerializer(serializers.Serializer):
+    """
+    Serializer for chatbot order review
+    """
+    session_id = serializers.CharField()
+    
+    def validate_session_id(self, value):
+        """Validate that session exists and has required data"""
+        try:
+            session = ChatbotSession.objects.get(session_id=value)
+            if not session.selected_service:
+                raise serializers.ValidationError('No service selected in this session.')
+            if not session.client_name or not session.client_email:
+                raise serializers.ValidationError('Client information is incomplete.')
+        except ChatbotSession.DoesNotExist:
+            raise serializers.ValidationError('Invalid session ID.')
+        return value
+
+
+class ChatbotOrderConfirmationSerializer(serializers.Serializer):
+    """
+    Serializer for chatbot order confirmation
+    """
+    session_id = serializers.CharField()
+    confirm = serializers.BooleanField()
+    
+    def validate_session_id(self, value):
+        """Validate that session exists and is ready for confirmation"""
+        try:
+            session = ChatbotSession.objects.get(session_id=value)
+            if session.is_completed:
+                raise serializers.ValidationError('Session is already completed.')
+            if not session.selected_service:
+                raise serializers.ValidationError('No service selected in this session.')
+            if not session.client_name or not session.client_email:
+                raise serializers.ValidationError('Client information is incomplete.')
+        except ChatbotSession.DoesNotExist:
+            raise serializers.ValidationError('Invalid session ID.')
+        return value
+
+
+class ChatbotOrderResponseSerializer(serializers.Serializer):
+    """
+    Serializer for chatbot order creation response
+    """
+    success = serializers.BooleanField()
+    message = serializers.CharField()
+    order_id = serializers.IntegerField(required=False)
+    client_username = serializers.CharField(required=False)
+    client_password = serializers.CharField(required=False)
+    redirect_url = serializers.URLField(required=False)

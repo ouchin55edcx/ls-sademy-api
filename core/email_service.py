@@ -228,6 +228,52 @@ class EmailService:
             return False
     
     @staticmethod
+    def send_client_credentials(user, password):
+        """
+        Send email notification to new client with login credentials
+        
+        Args:
+            user: User instance
+            password: Generated password for the user
+        """
+        try:
+            # Prepare email context
+            context = {
+                'user': user,
+                'password': password,
+                'login_url': f"{settings.ALLOWED_HOSTS[0] if settings.ALLOWED_HOSTS else 'localhost:8000'}/login/",
+            }
+            
+            # Render HTML template
+            html_content = render_to_string('emails/client_credentials.html', context)
+            
+            # Create plain text version
+            text_content = strip_tags(html_content)
+            
+            # Create email
+            subject = f"Welcome to Sademiy - Your Account Has Been Created"
+            from_email = settings.EMAIL_FROM
+            to_email = [user.email]
+            
+            # Create email message
+            msg = EmailMultiAlternatives(
+                subject=subject,
+                body=text_content,
+                from_email=from_email,
+                to=to_email
+            )
+            msg.attach_alternative(html_content, "text/html")
+            
+            # Send email
+            msg.send()
+            logger.info(f"Client credentials email sent successfully to {user.email}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to send client credentials email: {str(e)}")
+            return False
+    
+    @staticmethod
     def send_test_email(to_email, subject="Test Email", message="This is a test email"):
         """
         Send a simple test email

@@ -259,6 +259,14 @@ class Order(models.Model):
         blank=True,
         related_name='orders'
     )
+    chatbot_session = models.ForeignKey(
+        'ChatbotSession',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='orders',
+        help_text="Chatbot session that created this order"
+    )
     
     # Order details
     date = models.DateTimeField(auto_now_add=True)
@@ -276,6 +284,7 @@ class Order(models.Model):
     )
     
     # Optional fields
+    description = models.TextField(blank=True, help_text="Project description from chatbot or custom input")
     quotation = models.TextField(blank=True)
     discount = models.DecimalField(
         max_digits=5,
@@ -495,6 +504,71 @@ class Review(models.Model):
         return time_diff <= timedelta(hours=24)
 
 
+class Language(models.Model):
+    """
+    Language model for chatbot language selection
+    """
+    code = models.CharField(max_length=10, unique=True, help_text="Language code (e.g., 'en', 'fr', 'ar')")
+    name = models.CharField(max_length=100, help_text="Language name (e.g., 'English', 'French', 'Arabic')")
+    is_active = models.BooleanField(default=True, help_text="Whether this language is available for selection")
+    
+    class Meta:
+        db_table = 'languages'
+        verbose_name = 'Language'
+        verbose_name_plural = 'Languages'
+        ordering = ['name']
+    
+    def __str__(self):
+        return f"{self.name} ({self.code})"
+
+
+class ChatbotSession(models.Model):
+    """
+    Chatbot session model to track user interactions during the order flow
+    """
+    session_id = models.CharField(max_length=100, unique=True, help_text="Unique session identifier")
+    language = models.ForeignKey(
+        Language,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        help_text="Selected language for the session"
+    )
+    selected_service = models.ForeignKey(
+        Service,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        help_text="Service selected by the user"
+    )
+    selected_template = models.ForeignKey(
+        Template,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        help_text="Template selected by the user (if any)"
+    )
+    custom_description = models.TextField(
+        blank=True,
+        help_text="Custom project description provided by the user"
+    )
+    client_name = models.CharField(max_length=200, blank=True, help_text="Client's name")
+    client_email = models.EmailField(blank=True, help_text="Client's email")
+    client_phone = models.CharField(max_length=20, blank=True, help_text="Client's phone number")
+    is_completed = models.BooleanField(default=False, help_text="Whether the chatbot flow is completed")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = 'chatbot_sessions'
+        verbose_name = 'Chatbot Session'
+        verbose_name_plural = 'Chatbot Sessions'
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"Session {self.session_id} - {self.client_name or 'Anonymous'}"
+
+
 class Notification(models.Model):
     """
     Notification model for in-app and email notifications
@@ -514,6 +588,7 @@ class Notification(models.Model):
         ('system_alert', 'System Alert'),
         ('account_created', 'Account Created'),
         ('user_blacklisted', 'User Blacklisted'),
+        ('chatbot_order_created', 'Chatbot Order Created'),
     ]
     
     PRIORITY_LEVELS = [

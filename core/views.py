@@ -15,7 +15,7 @@ from django.http import HttpResponse, Http404, FileResponse
 from django.shortcuts import get_object_or_404
 from django.conf import settings
 import os
-from core.models import Service, Review, Template, Order, Status, Collaborator, Livrable, OrderStatusHistory, GlobalSettings
+from core.models import Service, Review, Template, Order, Status, Collaborator, Livrable, OrderStatusHistory, GlobalSettings, Language, ChatbotSession, Client
 from core.serializers import (
     LoginSerializer, UserSerializer, ServiceListSerializer,
     ServiceDetailSerializer, AllReviewsSerializer, ReviewSerializer, ReviewCreateUpdateSerializer,
@@ -28,7 +28,10 @@ from core.serializers import (
     LivrableCreateUpdateSerializer, LivrableListSerializer, LivrableDetailSerializer,
     LivrableAcceptRejectSerializer, LivrableAdminReviewSerializer, ProfileUpdateSerializer,
     GlobalSettingsSerializer, NotificationSerializer, NotificationListSerializer, 
-    NotificationMarkReadSerializer, NotificationStatsSerializer
+    NotificationMarkReadSerializer, NotificationStatsSerializer,
+    LanguageSerializer, ChatbotSessionSerializer, ChatbotSessionCreateSerializer,
+    ChatbotSessionUpdateSerializer, ChatbotClientRegistrationSerializer,
+    ChatbotOrderReviewSerializer, ChatbotOrderConfirmationSerializer, ChatbotOrderResponseSerializer
 )
 from core.permissions import IsAdminUser, IsCollaboratorUser, IsClientUser, IsAdminOrCollaboratorUser
 from core.email_service import EmailService
@@ -2861,3 +2864,323 @@ class NotificationDeleteAPIView(generics.DestroyAPIView):
         return Response({
             'message': 'Notification deleted successfully'
         }, status=status.HTTP_200_OK)
+
+
+# Chatbot Workflow Views
+
+class ChatbotLanguageListAPIView(generics.ListAPIView):
+    """
+    GET /api/chatbot/language/
+    
+    Get available languages for chatbot
+    """
+    permission_classes = [AllowAny]
+    serializer_class = LanguageSerializer
+    
+    def get_queryset(self):
+        """Return active languages"""
+        return Language.objects.filter(is_active=True)
+
+
+class ChatbotServiceListAPIView(generics.ListAPIView):
+    """
+    GET /api/services/
+    
+    Get all available services for chatbot
+    """
+    permission_classes = [AllowAny]
+    serializer_class = ServiceListSerializer
+    
+    def get_queryset(self):
+        """Return active services"""
+        return Service.objects.filter(is_active=True)
+
+
+class ChatbotServiceDetailAPIView(generics.RetrieveAPIView):
+    """
+    GET /api/services/{id}/
+    
+    Get service details with templates
+    """
+    permission_classes = [AllowAny]
+    serializer_class = ServiceDetailSerializer
+    queryset = Service.objects.filter(is_active=True)
+
+
+class ChatbotTemplateListAPIView(generics.ListAPIView):
+    """
+    GET /api/templates/
+    
+    Get templates for a specific service
+    """
+    permission_classes = [AllowAny]
+    serializer_class = TemplateSerializer
+    
+    def get_queryset(self):
+        """Return templates for the specified service"""
+        service_id = self.request.query_params.get('service_id')
+        if service_id:
+            return Template.objects.filter(service_id=service_id)
+        return Template.objects.none()
+
+
+class ChatbotSessionCreateAPIView(APIView):
+    """
+    POST /api/chatbot/session/
+
+    Create a new chatbot session
+    """
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        """Create chatbot session"""
+        try:
+            import uuid
+            
+            # Get language ID from request
+            language_id = request.data.get('language')
+            if not language_id:
+                return Response({
+                    'error': 'Language ID is required'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Validate language exists
+            try:
+                language = Language.objects.get(id=language_id)
+            except Language.DoesNotExist:
+                return Response({
+                    'error': 'Invalid language ID'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Create session
+            session_id = str(uuid.uuid4())
+            session = ChatbotSession.objects.create(
+                session_id=session_id,
+                language=language  # This should work with the ForeignKey
+            )
+            
+            return Response({
+                'session_id': session.session_id,
+                'message': 'Chatbot session created successfully'
+            }, status=status.HTTP_201_CREATED)
+            
+        except Exception as e:
+            return Response({
+                'error': f'Failed to create session: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class ChatbotSessionUpdateAPIView(generics.UpdateAPIView):
+    """
+    PUT /api/chatbot/session/{session_id}/
+    
+    Update chatbot session
+    """
+    permission_classes = [AllowAny]
+    serializer_class = ChatbotSessionUpdateSerializer
+    lookup_field = 'session_id'
+    
+    def get_queryset(self):
+        """Return session by session_id"""
+        return ChatbotSession.objects.all()
+
+
+class ChatbotClientRegistrationAPIView(APIView):
+    """
+    POST /api/chatbot/register/
+    
+    Register client through chatbot
+    """
+    permission_classes = [AllowAny]
+    
+    def post(self, request):
+        """Register client and update session"""
+        serializer = ChatbotClientRegistrationSerializer(data=request.data)
+        if serializer.is_valid():
+            session_id = serializer.validated_data['session_id']
+            name = serializer.validated_data['name']
+            email = serializer.validated_data['email']
+            phone = serializer.validated_data.get('phone', '')
+            
+            # Update session with client information
+            session = ChatbotSession.objects.get(session_id=session_id)
+            session.client_name = name
+            session.client_email = email
+            session.client_phone = phone
+            session.save()
+            
+            return Response({
+                'message': 'Client information saved successfully',
+                'session_id': session_id
+            }, status=status.HTTP_200_OK)
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ChatbotOrderReviewAPIView(APIView):
+    """
+    GET /api/orders/review/
+    
+    Get order review for chatbot session
+    """
+    permission_classes = [AllowAny]
+    
+    def get(self, request):
+        """Get order review"""
+        session_id = request.query_params.get('session_id')
+        if not session_id:
+            return Response({
+                'error': 'session_id is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        serializer = ChatbotOrderReviewSerializer(data={'session_id': session_id})
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            session = ChatbotSession.objects.get(session_id=session_id)
+            
+            # Prepare order summary
+            order_summary = {
+                'session_id': session.session_id,
+                'client_name': session.client_name,
+                'client_email': session.client_email,
+                'client_phone': session.client_phone,
+                'service': {
+                    'id': session.selected_service.id,
+                    'name': session.selected_service.name,
+                    'description': session.selected_service.description
+                },
+                'template': None,
+                'custom_description': session.custom_description,
+                'language': session.language.name if session.language else None
+            }
+            
+            if session.selected_template:
+                order_summary['template'] = {
+                    'id': session.selected_template.id,
+                    'title': session.selected_template.title,
+                    'description': session.selected_template.description
+                }
+            
+            return Response(order_summary, status=status.HTTP_200_OK)
+            
+        except ChatbotSession.DoesNotExist:
+            return Response({
+                'error': 'Session not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+
+class ChatbotOrderConfirmationAPIView(APIView):
+    """
+    POST /api/chatbot/confirm/
+    
+    Confirm and create order from chatbot session
+    """
+    permission_classes = [AllowAny]
+    
+    def post(self, request):
+        """Confirm order and create client account"""
+        serializer = ChatbotOrderConfirmationSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+        session_id = serializer.validated_data['session_id']
+        confirm = serializer.validated_data['confirm']
+        
+        if not confirm:
+            return Response({
+                'message': 'Order confirmation cancelled'
+            }, status=status.HTTP_200_OK)
+        
+        try:
+            session = ChatbotSession.objects.get(session_id=session_id)
+            
+            # Create client user account
+            import secrets
+            import string
+            
+            # Generate username and password
+            username = f"client_{session.client_email.split('@')[0]}_{secrets.token_hex(4)}"
+            password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(12))
+            
+            # Create user
+            user = User.objects.create_user(
+                username=username,
+                email=session.client_email,
+                password=password,
+                first_name=session.client_name.split()[0] if session.client_name else '',
+                last_name=' '.join(session.client_name.split()[1:]) if len(session.client_name.split()) > 1 else '',
+                phone=session.client_phone
+            )
+            
+            # Create client profile
+            client = Client.objects.create(user=user)
+            
+            # Get pending status
+            pending_status = Status.objects.get(name='Pending')
+            
+            # Create order
+            from datetime import datetime, timedelta
+            from decimal import Decimal
+            deadline_date = datetime.now() + timedelta(days=7)
+            
+            order = Order.objects.create(
+                client=client,
+                service=session.selected_service,
+                status=pending_status,
+                deadline_date=deadline_date,
+                total_price=Decimal('100.00'),  # Default price, should be calculated based on service
+                advance_payment=Decimal('0.00'),
+                description=session.custom_description or (session.selected_template.description if session.selected_template else ''),
+                quotation='',
+                discount=Decimal('0.00'),
+                lecture='',
+                comment='',
+                sademy_commission_amount=Decimal('0.00'),
+                commission_type='percentage',
+                commission_value=Decimal('0.00'),
+                is_blacklisted=False,
+                blacklist_reason='',
+                chatbot_session=session
+            )
+            
+            # Mark session as completed
+            session.is_completed = True
+            session.save()
+            
+            # Send credentials email
+            try:
+                from core.email_service import EmailService
+                EmailService.send_client_credentials(user, password)
+            except Exception as e:
+                logging.error(f"Failed to send credentials email: {str(e)}")
+            
+            # Prepare response
+            response_data = {
+                'success': True,
+                'message': 'Order created successfully and client account registered',
+                'order_id': order.id,
+                'client_username': username,
+                'client_password': password,
+                'redirect_url': f'/client/dashboard/'  # Adjust based on your frontend routing
+            }
+            
+            return Response(response_data, status=status.HTTP_201_CREATED)
+            
+        except ChatbotSession.DoesNotExist:
+            return Response({
+                'error': 'Session not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except Status.DoesNotExist:
+            return Response({
+                'error': 'Pending status not found. Please contact administrator.'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            logging.error(f"Error creating order: {str(e)}")
+            logging.error(f"Traceback: {error_details}")
+            return Response({
+                'error': f'Failed to create order: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
