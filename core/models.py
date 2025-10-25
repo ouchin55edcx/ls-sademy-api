@@ -556,6 +556,10 @@ class ChatbotSession(models.Model):
     client_email = models.EmailField(blank=True, help_text="Client's email")
     client_phone = models.CharField(max_length=20, blank=True, help_text="Client's phone number")
     is_completed = models.BooleanField(default=False, help_text="Whether the chatbot flow is completed")
+    conversation_history = models.JSONField(default=list, help_text="Chat conversation history")
+    admin_notes = models.TextField(blank=True, null=True, help_text="Admin notes about this session")
+    chat_status = models.CharField(max_length=20, blank=True, null=True, help_text="Current chat status")
+    whatsapp_link = models.CharField(max_length=200, blank=True, null=True, help_text="WhatsApp link for the session")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     

@@ -1490,3 +1490,45 @@ class ChatbotOrderResponseSerializer(serializers.Serializer):
     client_username = serializers.CharField(required=False)
     client_password = serializers.CharField(required=False)
     redirect_url = serializers.URLField(required=False)
+
+
+# ==================== NOTIFICATION SERIALIZERS ====================
+
+class NotificationSerializer(serializers.ModelSerializer):
+    """
+    Serializer for notifications
+    """
+    order_id = serializers.IntegerField(source='order.id', read_only=True)
+    livrable_id = serializers.IntegerField(source='livrable.id', read_only=True)
+    
+    class Meta:
+        model = Notification
+        fields = [
+            'id', 'notification_type', 'title', 'message', 'priority',
+            'is_read', 'created_at', 'read_at', 'order_id', 'livrable_id'
+        ]
+        read_only_fields = ['id', 'created_at', 'read_at']
+
+
+class NotificationListSerializer(serializers.ModelSerializer):
+    """
+    Serializer for notification list view
+    """
+    order_id = serializers.IntegerField(source='order.id', read_only=True)
+    livrable_id = serializers.IntegerField(source='livrable.id', read_only=True)
+    
+    class Meta:
+        model = Notification
+        fields = [
+            'id', 'notification_type', 'title', 'message', 'priority',
+            'is_read', 'created_at', 'read_at', 'order_id', 'livrable_id'
+        ]
+
+
+class NotificationStatsSerializer(serializers.Serializer):
+    """
+    Serializer for notification statistics
+    """
+    total = serializers.IntegerField()
+    unread = serializers.IntegerField()
+    read = serializers.IntegerField()

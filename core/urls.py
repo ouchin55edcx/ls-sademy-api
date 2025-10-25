@@ -163,7 +163,6 @@ urlpatterns = [
     path('notifications/<int:pk>/mark-read/', NotificationMarkReadAPIView.as_view(), name='notification-mark-read'),
     path('notifications/mark-all-read/', NotificationMarkAllReadAPIView.as_view(), name='notifications-mark-all-read'),
     path('notifications/stats/', NotificationStatsAPIView.as_view(), name='notifications-stats'),
-    path('notifications/<int:pk>/delete/', NotificationDeleteAPIView.as_view(), name='notification-delete'),
     
     # Chatbot Workflow (Public endpoints)
     path('chatbot/language/', ChatbotLanguageListAPIView.as_view(), name='chatbot-language-list'),

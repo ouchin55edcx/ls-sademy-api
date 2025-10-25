@@ -27,8 +27,7 @@ from core.serializers import (
     StatusSerializer, ActiveCollaboratorListSerializer, OrderStatusHistorySerializer,
     LivrableCreateUpdateSerializer, LivrableListSerializer, LivrableDetailSerializer,
     LivrableAcceptRejectSerializer, LivrableAdminReviewSerializer, ProfileUpdateSerializer,
-    GlobalSettingsSerializer, NotificationSerializer, NotificationListSerializer, 
-    NotificationMarkReadSerializer, NotificationStatsSerializer,
+    GlobalSettingsSerializer, NotificationSerializer, NotificationListSerializer, NotificationStatsSerializer,
     LanguageSerializer, ChatbotSessionSerializer, ChatbotSessionCreateSerializer,
     ChatbotSessionUpdateSerializer, ChatbotClientRegistrationSerializer,
     ChatbotOrderReviewSerializer, ChatbotOrderConfirmationSerializer, ChatbotOrderResponseSerializer
@@ -976,6 +975,24 @@ class OrderListCreateAPIView(generics.ListCreateAPIView):
             except Exception as e:
                 logging.error(f"Failed to send assignment email: {str(e)}")
         
+        # Create notification for admin about new order
+        from core.notification_service import NotificationService
+        try:
+            # Get all admin users
+            from core.models import Admin
+            admin_users = Admin.objects.select_related('user').all()
+            for admin in admin_users:
+                NotificationService.create_notification(
+                    user=admin.user,
+                    notification_type='order_assigned',
+                    title=f'New Order Created - Order #{order.id}',
+                    message=f'A new order has been created by {order.client.user.get_full_name() or order.client.user.username} for {order.service.name}',
+                    priority='medium',
+                    order=order
+                )
+        except Exception as e:
+            logging.error(f"Failed to create admin notification for new order: {str(e)}")
+        
         # Return order data with email status
         response_data = OrderListSerializer(order).data
         response_data['email_sent'] = email_sent
@@ -1109,6 +1126,42 @@ class OrderStatusUpdateAPIView(generics.UpdateAPIView):
             except Exception as e:
                 logging.error(f"Failed to send cancellation email: {str(e)}")
         
+        # Create notifications for status changes
+        from core.notification_service import NotificationService
+        try:
+            # Notify admin if status changed to under_review
+            if (old_status.name != instance.status.name and 
+                instance.status.name.lower() == 'under_review'):
+                from core.models import Admin
+                admin_users = Admin.objects.select_related('user').all()
+                for admin in admin_users:
+                    NotificationService.create_notification(
+                        user=admin.user,
+                        notification_type='order_status_changed',
+                        title=f'Order Under Review - Order #{instance.id}',
+                        message=f'Order #{instance.id} has been submitted for review by {instance.collaborator.user.get_full_name() or instance.collaborator.user.username if instance.collaborator else "Unknown"}',
+                        priority='medium',
+                        order=instance
+                    )
+            
+            # Notify admin if order was cancelled by client
+            if (old_status.name != instance.status.name and 
+                instance.status.name.lower() == 'cancelled' and
+                hasattr(request.user, 'client_profile')):
+                from core.models import Admin
+                admin_users = Admin.objects.select_related('user').all()
+                for admin in admin_users:
+                    NotificationService.create_notification(
+                        user=admin.user,
+                        notification_type='order_cancelled',
+                        title=f'Order Cancelled by Client - Order #{instance.id}',
+                        message=f'Order #{instance.id} has been cancelled by {instance.client.user.get_full_name() or instance.client.user.username}',
+                        priority='high',
+                        order=instance
+                    )
+        except Exception as e:
+            logging.error(f"Failed to create status change notifications: {str(e)}")
+        
         return Response({
             'id': instance.id,
             'status': instance.status.id,
@@ -1163,6 +1216,21 @@ class OrderCollaboratorAssignAPIView(generics.UpdateAPIView):
                     email_sent = EmailService.send_order_assignment_email(instance, instance.collaborator)
                 except Exception as e:
                     logging.error(f"Failed to send assignment email: {str(e)}")
+            
+            # Create notification for collaborator when order is assigned
+            from core.notification_service import NotificationService
+            try:
+                if instance.collaborator != old_collaborator:
+                    NotificationService.create_notification(
+                        user=instance.collaborator.user,
+                        notification_type='order_assigned',
+                        title=f'New Order Assigned - Order #{instance.id}',
+                        message=f'You have been assigned a new order #{instance.id} for {instance.service.name} by {instance.client.user.get_full_name() or instance.client.user.username}',
+                        priority='medium',
+                        order=instance
+                    )
+            except Exception as e:
+                logging.error(f"Failed to create collaborator assignment notification: {str(e)}")
         
         return Response({
             'id': instance.id,
@@ -1917,6 +1985,21 @@ class AdminLivrableReviewAPIView(generics.UpdateAPIView):
                     )
                 except Exception as e:
                     logging.error(f"Failed to send livrable reviewed email: {str(e)}")
+            
+            # Create notification for client when livrable is reviewed by admin
+            from core.notification_service import NotificationService
+            try:
+                NotificationService.create_notification(
+                    user=livrable.order.client.user,
+                    notification_type='livrable_reviewed',
+                    title=f'Deliverable Reviewed - Order #{livrable.order.id}',
+                    message=f'Your deliverable "{livrable.name}" has been reviewed by admin and is ready for your approval.',
+                    priority='medium',
+                    order=livrable.order,
+                    livrable=livrable
+                )
+            except Exception as e:
+                logging.error(f"Failed to create client notification for livrable review: {str(e)}")
         
         # Return response with email status
         response_data = serializer.data
@@ -1986,6 +2069,36 @@ class ClientLivrableAcceptRejectAPIView(generics.UpdateAPIView):
         
         # Save the livrable first
         livrable = serializer.save()
+        
+        # Create notifications for livrable acceptance/rejection
+        from core.notification_service import NotificationService
+        try:
+            if is_accepted:
+                # Notify collaborator when livrable is accepted
+                if livrable.order.collaborator:
+                    NotificationService.create_notification(
+                        user=livrable.order.collaborator.user,
+                        notification_type='livrable_accepted',
+                        title=f'Deliverable Accepted - Order #{livrable.order.id}',
+                        message=f'Your deliverable "{livrable.name}" has been accepted by {livrable.order.client.user.get_full_name() or livrable.order.client.user.username}',
+                        priority='medium',
+                        order=livrable.order,
+                        livrable=livrable
+                    )
+            else:
+                # Notify collaborator when livrable is rejected
+                if livrable.order.collaborator:
+                    NotificationService.create_notification(
+                        user=livrable.order.collaborator.user,
+                        notification_type='livrable_rejected',
+                        title=f'Deliverable Rejected - Order #{livrable.order.id}',
+                        message=f'Your deliverable "{livrable.name}" has been rejected by {livrable.order.client.user.get_full_name() or livrable.order.client.user.username}. Please review and resubmit.',
+                        priority='high',
+                        order=livrable.order,
+                        livrable=livrable
+                    )
+        except Exception as e:
+            logging.error(f"Failed to create livrable acceptance/rejection notifications: {str(e)}")
         
         if is_accepted:
             # Check if all livrables for this order are accepted
@@ -2724,7 +2837,7 @@ class NotificationMarkReadAPIView(generics.UpdateAPIView):
     }
     """
     permission_classes = [IsAuthenticated]
-    serializer_class = NotificationMarkReadSerializer
+    serializer_class = NotificationSerializer
     
     def get_queryset(self):
         """Return notifications for the authenticated user"""
@@ -3145,6 +3258,24 @@ class ChatbotOrderConfirmationAPIView(APIView):
                 chatbot_session=session
             )
             
+            # Create notification for admin about new chatbot order
+            from core.notification_service import NotificationService
+            try:
+                # Get all admin users
+                from core.models import Admin
+                admin_users = Admin.objects.select_related('user').all()
+                for admin in admin_users:
+                    NotificationService.create_notification(
+                        user=admin.user,
+                        notification_type='chatbot_order_created',
+                        title=f'New Chatbot Order Created - Order #{order.id}',
+                        message=f'A new order has been created via chatbot by {client.user.get_full_name() or client.user.username} for {order.service.name}',
+                        priority='medium',
+                        order=order
+                    )
+            except Exception as e:
+                logging.error(f"Failed to create admin notification for chatbot order: {str(e)}")
+            
             # Mark session as completed
             session.is_completed = True
             session.save()
@@ -3183,4 +3314,111 @@ class ChatbotOrderConfirmationAPIView(APIView):
             logging.error(f"Traceback: {error_details}")
             return Response({
                 'error': f'Failed to create order: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ==================== NOTIFICATION ENDPOINTS ====================
+
+class NotificationListAPIView(generics.ListAPIView):
+    """
+    GET /api/notifications/
+    
+    List notifications for the authenticated user
+    """
+    permission_classes = [IsAuthenticated]
+    serializer_class = NotificationListSerializer
+    
+    def get_queryset(self):
+        """Return notifications for the authenticated user"""
+        from core.models import Notification
+        return Notification.objects.filter(user=self.request.user).order_by('-created_at')
+
+
+class NotificationRetrieveAPIView(generics.RetrieveAPIView):
+    """
+    GET /api/notifications/{id}/
+    
+    Retrieve a specific notification
+    """
+    permission_classes = [IsAuthenticated]
+    serializer_class = NotificationSerializer
+    
+    def get_queryset(self):
+        """Return notifications for the authenticated user"""
+        from core.models import Notification
+        return Notification.objects.filter(user=self.request.user)
+
+
+class NotificationMarkAsReadAPIView(generics.UpdateAPIView):
+    """
+    PATCH /api/notifications/{id}/mark-read/
+    
+    Mark a notification as read
+    """
+    permission_classes = [IsAuthenticated]
+    serializer_class = NotificationSerializer
+    
+    def get_queryset(self):
+        """Return notifications for the authenticated user"""
+        from core.models import Notification
+        return Notification.objects.filter(user=self.request.user)
+    
+    def update(self, request, *args, **kwargs):
+        """Mark notification as read"""
+        from core.notification_service import NotificationService
+        
+        notification = self.get_object()
+        updated_notification = NotificationService.mark_notification_as_read(notification.id, request.user)
+        
+        if updated_notification:
+            serializer = self.get_serializer(updated_notification)
+            return Response(serializer.data)
+        else:
+            return Response({'error': 'Notification not found'}, status=status.HTTP_404_NOT_FOUND)
+
+
+class NotificationMarkAllAsReadAPIView(APIView):
+    """
+    POST /api/notifications/mark-all-read/
+    
+    Mark all notifications as read for the authenticated user
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        """Mark all notifications as read"""
+        from core.notification_service import NotificationService
+        
+        try:
+            updated_count = NotificationService.mark_all_notifications_as_read(request.user)
+            return Response({
+                'message': f'{updated_count} notifications marked as read',
+                'updated_count': updated_count
+            })
+        except Exception as e:
+            return Response({
+                'error': f'Failed to mark notifications as read: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class NotificationStatsAPIView(APIView):
+    """
+    GET /api/notifications/stats/
+    
+    Get notification statistics for the authenticated user
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        """Get notification statistics"""
+        from core.notification_service import NotificationService
+        from core.serializers import NotificationStatsSerializer
+        
+        try:
+            stats = NotificationService.get_notification_stats(request.user)
+            serializer = NotificationStatsSerializer(stats)
+            return Response(serializer.data)
+        except Exception as e:
+            return Response({
+                'error': f'Failed to get notification stats: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
