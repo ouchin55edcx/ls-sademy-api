@@ -24,6 +24,7 @@ from core.serializers import (
     TemplateSerializer, TemplateCreateUpdateSerializer,
     OrderListSerializer, OrderCreateUpdateSerializer, OrderDetailSerializer,
     OrderStatusUpdateSerializer, OrderCancelSerializer, OrderCollaboratorAssignSerializer,
+    ClientOrderCreateSerializer,
     StatusSerializer, ActiveCollaboratorListSerializer, OrderStatusHistorySerializer,
     LivrableCreateUpdateSerializer, LivrableListSerializer, LivrableDetailSerializer,
     LivrableAcceptRejectSerializer, LivrableAdminReviewSerializer, ProfileUpdateSerializer,
@@ -1144,18 +1145,57 @@ class OrderStatusUpdateAPIView(generics.UpdateAPIView):
                         order=instance
                     )
             
-            # Notify admin if order was cancelled by client
+            # Handle order cancellation notifications
             if (old_status.name != instance.status.name and 
-                instance.status.name.lower() == 'cancelled' and
-                hasattr(request.user, 'client_profile')):
+                instance.status.name.lower() == 'cancelled'):
+                
+                # Get cancellation reason from notes if available
+                notes = request.data.get('notes', '')
+                cancellation_reason = notes if notes else 'Order cancelled'
+                
+                # Determine who cancelled the order
+                cancelled_by = "Unknown"
+                if hasattr(request.user, 'client_profile'):
+                    cancelled_by = f"Client {instance.client.user.get_full_name() or instance.client.user.username}"
+                elif hasattr(request.user, 'admin_profile'):
+                    cancelled_by = f"Admin {request.user.get_full_name() or request.user.username}"
+                elif hasattr(request.user, 'collaborator_profile'):
+                    cancelled_by = f"Collaborator {request.user.get_full_name() or request.user.username}"
+                
+                # Notify all admins about cancellation
                 from core.models import Admin
                 admin_users = Admin.objects.select_related('user').all()
                 for admin in admin_users:
                     NotificationService.create_notification(
                         user=admin.user,
                         notification_type='order_cancelled',
-                        title=f'Order Cancelled by Client - Order #{instance.id}',
-                        message=f'Order #{instance.id} has been cancelled by {instance.client.user.get_full_name() or instance.client.user.username}',
+                        title=f'Order Cancelled - Order #{instance.id}',
+                        message=f'Order #{instance.id} has been cancelled by {cancelled_by}. Reason: {cancellation_reason}',
+                        priority='high',
+                        order=instance
+                    )
+                
+                # Notify collaborator if assigned (and not the one who cancelled)
+                if (instance.collaborator and 
+                    not hasattr(request.user, 'collaborator_profile') or 
+                    instance.collaborator.user != request.user):
+                    NotificationService.create_notification(
+                        user=instance.collaborator.user,
+                        notification_type='order_cancelled',
+                        title=f'Order Cancelled - Order #{instance.id}',
+                        message=f'Order #{instance.id} has been cancelled by {cancelled_by}. Reason: {cancellation_reason}',
+                        priority='high',
+                        order=instance
+                    )
+                
+                # Notify client if cancelled by admin or collaborator
+                if (not hasattr(request.user, 'client_profile') and 
+                    instance.client and instance.client.user):
+                    NotificationService.create_notification(
+                        user=instance.client.user,
+                        notification_type='order_cancelled',
+                        title=f'Order Cancelled - Order #{instance.id}',
+                        message=f'Order #{instance.id} has been cancelled by {cancelled_by}. Reason: {cancellation_reason}',
                         priority='high',
                         order=instance
                     )
@@ -1519,6 +1559,35 @@ class ClientOrderCancelAPIView(generics.UpdateAPIView):
             except Exception as e:
                 logging.error(f"Failed to send cancellation email: {str(e)}")
         
+        # Create notifications for admin and collaborator
+        from core.notification_service import NotificationService
+        try:
+            # Notify all admins about order cancellation
+            from core.models import Admin
+            admin_users = Admin.objects.select_related('user').all()
+            for admin in admin_users:
+                NotificationService.create_notification(
+                    user=admin.user,
+                    notification_type='order_cancelled',
+                    title=f'Order Cancelled - Order #{instance.id}',
+                    message=f'Order #{instance.id} has been cancelled by client {instance.client.user.get_full_name() or instance.client.user.username}. Reason: {cancellation_reason}' if cancellation_reason else f'Order #{instance.id} has been cancelled by client {instance.client.user.get_full_name() or instance.client.user.username}.',
+                    priority='high',
+                    order=instance
+                )
+            
+            # Notify collaborator if assigned
+            if instance.collaborator:
+                NotificationService.create_notification(
+                    user=instance.collaborator.user,
+                    notification_type='order_cancelled',
+                    title=f'Order Cancelled - Order #{instance.id}',
+                    message=f'Order #{instance.id} has been cancelled by client {instance.client.user.get_full_name() or instance.client.user.username}. Reason: {cancellation_reason}' if cancellation_reason else f'Order #{instance.id} has been cancelled by client {instance.client.user.get_full_name() or instance.client.user.username}.',
+                    priority='high',
+                    order=instance
+                )
+        except Exception as e:
+            logging.error(f"Failed to create cancellation notifications: {str(e)}")
+        
         return Response({
             'id': instance.id,
             'status': instance.status.id,
@@ -1527,6 +1596,81 @@ class ClientOrderCancelAPIView(generics.UpdateAPIView):
             'cancellation_reason': cancellation_reason,
             'email_sent': email_sent
         })
+
+
+class ClientOrderCreateAPIView(generics.CreateAPIView):
+    """
+    POST /api/client/orders/create/
+    
+    Create a new order (client only)
+    
+    Request body:
+    {
+        "service": 1,
+        "deadline_date": "2024-02-15T10:30:00Z",
+        "budget": "1500.00",
+        "project_description": "I need a modern website for my business with e-commerce functionality",
+        "special_instructions": "Please use React and Node.js, and ensure mobile responsiveness"
+    }
+    
+    Response:
+    {
+        "id": 1,
+        "service": 1,
+        "deadline_date": "2024-02-15T10:30:00Z",
+        "total_price": "1500.00",
+        "quotation": "I need a modern website for my business with e-commerce functionality",
+        "lecture": "Please use React and Node.js, and ensure mobile responsiveness",
+        "status": 1,
+        "status_name": "pending",
+        "message": "Order created successfully"
+    }
+    """
+    permission_classes = [IsAuthenticated]
+    serializer_class = ClientOrderCreateSerializer
+    
+    def get_permissions(self):
+        """
+        Allow only clients to create orders
+        """
+        if hasattr(self.request.user, 'client_profile'):
+            return [IsAuthenticated()]
+        else:
+            return [IsAdminUser()]
+    
+    def create(self, request, *args, **kwargs):
+        """Create order and send email notification to admin"""
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        order = serializer.save()
+        
+        # Send email notification to admin about new order
+        email_sent = False
+        try:
+            # Get admin users to notify
+            from core.models import Admin
+            admin_users = Admin.objects.filter(user__is_active=True)
+            
+            for admin in admin_users:
+                if admin.user.email:
+                    email_sent = EmailService.send_new_order_notification_email(order, admin.user)
+                    if email_sent:
+                        break  # Send to first available admin
+        except Exception as e:
+            logging.error(f"Failed to send new order notification email: {str(e)}")
+        
+        return Response({
+            'id': order.id,
+            'service': order.service.id,
+            'deadline_date': order.deadline_date,
+            'total_price': str(order.total_price),
+            'quotation': order.quotation,
+            'lecture': order.lecture,
+            'status': order.status.id,
+            'status_name': order.status.name,
+            'message': 'Order created successfully',
+            'email_sent': email_sent
+        }, status=status.HTTP_201_CREATED)
 
 
 class OrderStatusHistoryAPIView(generics.ListAPIView):
@@ -1846,33 +1990,88 @@ class CollaboratorLivrableListCreateAPIView(generics.ListCreateAPIView):
             'order__client__user', 'order__service', 'order__status', 'order__collaborator__user'
         ).all()
     
-    def perform_create(self, serializer):
-        """Set the order and validate collaborator assignment"""
-        order = serializer.validated_data['order']
-        
-        # Double-check that the order is assigned to this collaborator
-        if order.collaborator != self.request.user.collaborator_profile:
-            raise serializers.ValidationError('You can only create livrables for orders assigned to you.')
-        
-        # Save the livrable first
-        livrable = serializer.save()
-        
-        # Automatically change order status to "under_review" when collaborator submits a deliverable
+    def create(self, request, *args, **kwargs):
+        """Override create method to return proper 201 status and handle notifications"""
         try:
-            under_review_status = Status.objects.get(name='under_review')
-            if order.status != under_review_status:
-                # Set attributes for signal handlers to track who made the change
+            # Validate the serializer
+            serializer = self.get_serializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            
+            # Get the order and validate collaborator assignment
+            order = serializer.validated_data['order']
+            
+            # Double-check that the order is assigned to this collaborator
+            if order.collaborator != self.request.user.collaborator_profile:
+                return Response(
+                    {'error': 'You can only create livrables for orders assigned to you.'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            # Save the livrable first
+            livrable = serializer.save()
+            
+            # Automatically change order status to "under_review" when collaborator submits a deliverable
+            try:
+                under_review_status = Status.objects.get(name='under_review')
+                if order.status != under_review_status:
+                    # Set attributes for signal handlers to track who made the change
+                    order._changed_by_user = self.request.user
+                    order._status_change_notes = f'Status changed automatically when collaborator submitted deliverable: {livrable.name}'
+                    order.status = under_review_status
+                    order.save()
+            except Status.DoesNotExist:
+                # If "under_review" status doesn't exist, create it
+                under_review_status = Status.objects.create(name='under_review')
                 order._changed_by_user = self.request.user
                 order._status_change_notes = f'Status changed automatically when collaborator submitted deliverable: {livrable.name}'
                 order.status = under_review_status
                 order.save()
-        except Status.DoesNotExist:
-            # If "under_review" status doesn't exist, create it
-            under_review_status = Status.objects.create(name='under_review')
-            order._changed_by_user = self.request.user
-            order._status_change_notes = f'Status changed automatically when collaborator submitted deliverable: {livrable.name}'
-            order.status = under_review_status
-            order.save()
+            
+            # Send notifications to admin and client about new livrable
+            from core.notification_service import NotificationService
+            try:
+                # Notify all admins about new livrable
+                from core.models import Admin
+                admin_users = Admin.objects.select_related('user').all()
+                for admin in admin_users:
+                    NotificationService.create_notification(
+                        user=admin.user,
+                        notification_type='livrable_submitted',
+                        title=f'New Deliverable Submitted - Order #{order.id}',
+                        message=f'Collaborator {self.request.user.get_full_name() or self.request.user.username} has submitted a new deliverable "{livrable.name}" for Order #{order.id}',
+                        priority='medium',
+                        order=order,
+                        livrable=livrable
+                    )
+                
+                # Notify client about new livrable
+                if order.client and order.client.user:
+                    NotificationService.create_notification(
+                        user=order.client.user,
+                        notification_type='livrable_submitted',
+                        title=f'New Deliverable Available - Order #{order.id}',
+                        message=f'A new deliverable "{livrable.name}" has been submitted for your Order #{order.id} and is ready for review',
+                        priority='medium',
+                        order=order,
+                        livrable=livrable
+                    )
+            except Exception as e:
+                logging.error(f"Failed to create livrable notifications: {str(e)}")
+            
+            # Return success response with 201 status
+            return Response({
+                'message': 'Livrable created successfully',
+                'livrable': serializer.data,
+                'order_status': order.status.name,
+                'notifications_sent': True
+            }, status=status.HTTP_201_CREATED)
+            
+        except Exception as e:
+            logging.error(f"Error creating livrable: {str(e)}", exc_info=True)
+            return Response(
+                {'error': f'Failed to create livrable: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 class CollaboratorLivrableRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):

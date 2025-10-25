@@ -99,6 +99,16 @@ CORS_ALLOW_HEADERS = [
     'user-agent',
     'x-csrftoken',
     'x-requested-with',
+    'content-disposition',
+    'content-length',
+]
+
+# Expose headers to the client
+CORS_EXPOSE_HEADERS = [
+    'content-type',
+    'x-csrftoken',
+    'content-disposition',
+    'content-length',
 ]
 
 # Database
@@ -208,6 +218,11 @@ SIMPLE_JWT = {
     'SLIDING_TOKEN_LIFETIME': timedelta(minutes=5),
     'SLIDING_TOKEN_REFRESH_LIFETIME': timedelta(days=1),
 }
+
+# File Upload Settings
+FILE_UPLOAD_MAX_MEMORY_SIZE = 50 * 1024 * 1024  # 50MB
+DATA_UPLOAD_MAX_MEMORY_SIZE = 50 * 1024 * 1024  # 50MB
+FILE_UPLOAD_PERMISSIONS = 0o644
 
 # Email Configuration for Mailtrap
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'

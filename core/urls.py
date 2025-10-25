@@ -32,6 +32,7 @@ from core.views import (
     CollaboratorStatisticsAPIView,
     ClientOrderListAPIView,
     ClientOrderCancelAPIView,
+    ClientOrderCreateAPIView,
     ClientStatisticsAPIView,
     OrderStatusHistoryAPIView,
     CollaboratorLivrableListCreateAPIView,
@@ -129,6 +130,7 @@ urlpatterns = [
     
     # Client - Order Management (Client Only)
     path('client/orders/', ClientOrderListAPIView.as_view(), name='client-orders-list'),
+    path('client/orders/create/', ClientOrderCreateAPIView.as_view(), name='client-order-create'),
     path('client/orders/<int:pk>/cancel/', ClientOrderCancelAPIView.as_view(), name='client-order-cancel'),
     path('client/orders/<int:order_id>/status-history/', OrderStatusHistoryAPIView.as_view(), name='order-status-history'),
     path('client/statistics/', ClientStatisticsAPIView.as_view(), name='client-statistics'),

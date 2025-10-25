@@ -1200,6 +1200,82 @@ class OrderCollaboratorAssignSerializer(serializers.ModelSerializer):
         return value
 
 
+class ClientOrderCreateSerializer(serializers.ModelSerializer):
+    """
+    Serializer for clients to create orders with simplified fields
+    """
+    project_description = serializers.CharField(
+        source='quotation',
+        required=True,
+        help_text="Detailed description of the project"
+    )
+    special_instructions = serializers.CharField(
+        source='lecture',
+        required=False,
+        allow_blank=True,
+        help_text="Optional special instructions or requirements"
+    )
+    budget = serializers.DecimalField(
+        source='total_price',
+        max_digits=10,
+        decimal_places=2,
+        required=False,
+        allow_null=True,
+        help_text="Optional budget suggestion (leave empty for quote)"
+    )
+    
+    class Meta:
+        model = Order
+        fields = [
+            'service',
+            'deadline_date',
+            'budget',
+            'project_description',
+            'special_instructions'
+        ]
+    
+    def validate_service(self, value):
+        """Validate that service exists and is active"""
+        if not value:
+            raise serializers.ValidationError('Service is required.')
+        if not value.is_active:
+            raise serializers.ValidationError('Cannot create order for inactive service.')
+        return value
+    
+    def validate_deadline_date(self, value):
+        """Validate deadline date is in the future"""
+        from django.utils import timezone
+        if value <= timezone.now():
+            raise serializers.ValidationError('Deadline date must be in the future.')
+        return value
+    
+    def validate_budget(self, value):
+        """Validate budget if provided"""
+        if value is not None and value <= 0:
+            raise serializers.ValidationError('Budget must be greater than 0 if provided.')
+        return value
+    
+    def create(self, validated_data):
+        """Create order with pending status and current client"""
+        from core.models import Status
+        
+        # Get the pending status
+        try:
+            pending_status = Status.objects.get(name='pending')
+        except Status.DoesNotExist:
+            raise serializers.ValidationError('Pending status not found. Please contact administrator.')
+        
+        # Set the client from the authenticated user
+        validated_data['client'] = self.context['request'].user.client_profile
+        validated_data['status'] = pending_status
+        
+        # Set default values for required fields
+        if not validated_data.get('total_price'):
+            validated_data['total_price'] = 0.01  # Minimum required value
+        
+        return super().create(validated_data)
+
+
 class ActiveCollaboratorListSerializer(serializers.ModelSerializer):
     """
     Serializer for listing active collaborators (for assignment dropdown)
