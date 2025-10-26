@@ -208,3 +208,10 @@ EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
 EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
 EMAIL_FROM = config('EMAIL_FROM', default='noreply@sademiy.com')
 DEFAULT_FROM_EMAIL = EMAIL_FROM
+
+# Infobip Configuration for WhatsApp and SMS
+INFOBIP_API_KEY = config('INFOBIP_API_KEY', default='')
+INFOBIP_BASE_URL = config('INFOBIP_BASE_URL', default='https://api.infobip.com')
+INFOBIP_SENDER = config('INFOBIP_SENDER', default='+212XXXXXXXXX')  # Format: +212XXXXXXXXX
+INFOBIP_SMS_SENDER = config('INFOBIP_SMS_SENDER', default='447491163443')  # SMS sender number without +
+ADMIN_PHONE = config('ADMIN_WHATSAPP_NUMBER', default='+212636359603')  # Admin phone for notifications

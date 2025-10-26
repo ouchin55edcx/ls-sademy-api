@@ -3621,3 +3621,118 @@ class NotificationStatsAPIView(APIView):
             return Response({
                 'error': f'Failed to get notification stats: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class OrderCreateAPIView(APIView):
+    """
+    POST /api/orders/create/
+    
+    Public endpoint for creating orders with WhatsApp notifications
+    """
+    permission_classes = [AllowAny]
+    
+    def post(self, request):
+        """Create order and send notifications"""
+        from core.serializers import OrderCreateSerializer, OrderCreateResponseSerializer
+        from core.whatsapp_service import WhatsAppService
+        from core.sms_service import SMSService
+        from core.email_service import EmailService
+        from core.notification_service import NotificationService
+        from core.models import Admin
+        from django.utils import timezone
+        import logging
+        
+        logger = logging.getLogger(__name__)
+        
+        # Validate input data
+        serializer = OrderCreateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({
+                'success': False,
+                'message': 'Validation error',
+                'errors': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            # Create order
+            order = serializer.save()
+            
+            # Initialize notification results
+            notifications = {
+                'email_sent': False,
+                'sms_sent': False,
+                'sms_message_id': None,
+                'sms_error': None,
+                'whatsapp_sent': False,
+                'whatsapp_message_id': None,
+                'whatsapp_error': None
+            }
+            
+            # Send WhatsApp notification to client (disabled)
+            # try:
+            #     whatsapp_result = WhatsAppService.send_order_confirmation(order)
+            #     notifications['whatsapp_sent'] = whatsapp_result.get('success', False)
+            #     notifications['whatsapp_message_id'] = whatsapp_result.get('message_id')
+            #     if not whatsapp_result.get('success'):
+            #         notifications['whatsapp_error'] = whatsapp_result.get('error')
+            # except Exception as e:
+            #     logger.error(f"Failed to send WhatsApp notification: {str(e)}")
+            #     notifications['whatsapp_error'] = str(e)
+            
+            # Send admin notifications
+            try:
+                # Create in-app notification for admins (without email)
+                admin_users = Admin.objects.select_related('user').all()
+                for admin in admin_users:
+                    NotificationService.create_notification(
+                        user=admin.user,
+                        notification_type='order_assigned',
+                        title=f'New Order Created - {order.order_number}',
+                        message=f'A new order has been created by {order.client.user.get_full_name() or order.client.user.username} for {order.service.name}',
+                        priority='medium',
+                        order=order,
+                        send_email=False  # Disable email for now
+                    )
+                
+                # Send SMS to admin (disabled)
+                # admin_sms_result = SMSService.send_admin_notification(order)
+                # if admin_sms_result.get('success'):
+                #     logger.info(f"Admin SMS notification sent for order {order.order_number}")
+                #     notifications['sms_sent'] = True
+                #     notifications['sms_message_id'] = admin_sms_result.get('message_id')
+                # else:
+                #     notifications['sms_error'] = admin_sms_result.get('error')
+                
+                # Send WhatsApp to admin (disabled)
+                # if not admin_sms_result.get('success'):
+                #     admin_whatsapp_result = WhatsAppService.send_admin_notification(order)
+                #     if admin_whatsapp_result.get('success'):
+                #         logger.info(f"Admin WhatsApp notification sent for order {order.order_number}")
+                #         notifications['whatsapp_sent'] = True
+                #         notifications['whatsapp_message_id'] = admin_whatsapp_result.get('message_id')
+                #     else:
+                #         notifications['whatsapp_error'] = admin_whatsapp_result.get('error')
+                
+            except Exception as e:
+                logger.error(f"Failed to send admin notification: {str(e)}")
+            
+            # Prepare response data
+            response_serializer = OrderCreateResponseSerializer(order)
+            response_data = {
+                'success': True,
+                'message': 'Order created successfully',
+                'data': response_serializer.data,
+                'notifications': notifications
+            }
+            
+            # System notifications are always created, so order is successful
+            response_data['message'] = 'Order created successfully with system notifications'
+            return Response(response_data, status=status.HTTP_201_CREATED)
+                
+        except Exception as e:
+            logger.error(f"Failed to create order: {str(e)}")
+            return Response({
+                'success': False,
+                'message': 'Failed to create order',
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

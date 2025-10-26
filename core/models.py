@@ -269,6 +269,12 @@ class Order(models.Model):
     )
     
     # Order details
+    order_number = models.CharField(
+        max_length=20,
+        unique=True,
+        blank=True,
+        help_text="Auto-generated order number (e.g., ORD-2024-0001)"
+    )
     date = models.DateTimeField(auto_now_add=True)
     deadline_date = models.DateTimeField()
     total_price = models.DecimalField(
@@ -346,6 +352,35 @@ class Order(models.Model):
     def is_fully_paid(self):
         """Check if order is fully paid"""
         return self.advance_payment >= self.total_price
+    
+    def generate_order_number(self):
+        """
+        Generate unique order number in format ORD-YYYY-NNNN
+        """
+        from django.utils import timezone
+        from django.db.models import Max
+        
+        if self.order_number:
+            return self.order_number
+        
+        current_year = timezone.now().year
+        
+        # Get the highest order number for this year
+        last_order = Order.objects.filter(
+            order_number__startswith=f'ORD-{current_year}-'
+        ).aggregate(max_number=Max('order_number'))
+        
+        if last_order['max_number']:
+            # Extract the number part and increment
+            last_number = int(last_order['max_number'].split('-')[-1])
+            new_number = last_number + 1
+        else:
+            # First order of the year
+            new_number = 1
+        
+        # Format as ORD-YYYY-NNNN
+        self.order_number = f'ORD-{current_year}-{new_number:04d}'
+        return self.order_number
     
     def calculate_commission(self, commission_type=None, commission_value=None):
         """
@@ -691,87 +726,95 @@ class Notification(models.Model):
 
 
 # Signal handlers for automatic status history tracking
-@receiver(post_save, sender=Order)
-def create_status_history_on_order_creation(sender, instance, created, **kwargs):
-    """
-    Create initial status history entry when an order is created
-    """
-    if created:
-        OrderStatusHistory.objects.create(
-            order=instance,
-            status=instance.status,
-            changed_by=None,  # System created
-            notes="Order created"
-        )
+# @receiver(post_save, sender=Order)
+# def create_status_history_on_order_creation(sender, instance, created, **kwargs):
+#     """
+#     Create initial status history entry when an order is created
+#     """
+#     if created:
+#         OrderStatusHistory.objects.create(
+#             order=instance,
+#             status=instance.status,
+#             changed_by=None,  # System created
+#             notes="Order created"
+#         )
 
 
-@receiver(pre_save, sender=Order)
-def track_status_change(sender, instance, **kwargs):
-    """
-    Track status changes before saving the order
-    """
-    if instance.pk:  # Only for existing orders
-        try:
-            old_order = Order.objects.get(pk=instance.pk)
-            if old_order.status != instance.status:
-                # Store the old status to create history entry after save
-                instance._status_changed = True
-                instance._old_status = old_order.status
-        except Order.DoesNotExist:
-            pass
+# @receiver(pre_save, sender=Order)
+# def track_status_change(sender, instance, **kwargs):
+#     """
+#     Track status changes before saving the order
+#     """
+#     if instance.pk:  # Only for existing orders
+#         try:
+#             old_order = Order.objects.get(pk=instance.pk)
+#             if old_order.status != instance.status:
+#                 # Store the old status to create history entry after save
+#                 instance._status_changed = True
+#                 instance._old_status = old_order.status
+#         except Order.DoesNotExist:
+#             pass
 
 
-@receiver(post_save, sender=Order)
-def create_status_history_on_status_change(sender, instance, created, **kwargs):
-    """
-    Create status history entry when status changes
-    """
-    if not created and hasattr(instance, '_status_changed') and instance._status_changed:
-        # Try to get the user from the current request context
-        # This will be set by the view when updating the order
-        changed_by = getattr(instance, '_changed_by_user', None)
-        notes = getattr(instance, '_status_change_notes', '')
-        
-        OrderStatusHistory.objects.create(
-            order=instance,
-            status=instance.status,
-            changed_by=changed_by,
-            notes=notes
-        )
-        
-        # Clean up temporary attributes
-        delattr(instance, '_status_changed')
-        delattr(instance, '_old_status')
-        if hasattr(instance, '_changed_by_user'):
-            delattr(instance, '_changed_by_user')
-        if hasattr(instance, '_status_change_notes'):
-            delattr(instance, '_status_change_notes')
+# @receiver(post_save, sender=Order)
+# def create_status_history_on_status_change(sender, instance, created, **kwargs):
+#     """
+#     Create status history entry when status changes
+#     """
+#     if not created and hasattr(instance, '_status_changed') and instance._status_changed:
+#         # Try to get the user from the current request context
+#         # This will be set by the view when updating the order
+#         changed_by = getattr(instance, '_changed_by_user', None)
+#         notes = getattr(instance, '_status_change_notes', '')
+#         
+#         OrderStatusHistory.objects.create(
+#             order=instance,
+#             status=instance.status,
+#             changed_by=changed_by,
+#             notes=notes
+#         )
+#         
+#         # Clean up temporary attributes
+#         delattr(instance, '_status_changed')
+#         delattr(instance, '_old_status')
+#         if hasattr(instance, '_changed_by_user'):
+#             delattr(instance, '_changed_by_user')
+#         if hasattr(instance, '_status_change_notes'):
+#             delattr(instance, '_status_change_notes')
 
 
-@receiver(post_save, sender=Order)
-def blacklist_client_on_order_blacklist(sender, instance, created, **kwargs):
-    """
-    Blacklist client when order is blacklisted
-    """
-    if not created and instance.is_blacklisted:
-        # Check if the client is not already blacklisted
-        if not instance.client.is_blacklisted:
-            instance.client.is_blacklisted = True
-            instance.client.save()
+# @receiver(post_save, sender=Order)
+# def blacklist_client_on_order_blacklist(sender, instance, created, **kwargs):
+#     """
+#     Blacklist client when order is blacklisted
+#     """
+#     if not created and instance.is_blacklisted:
+#         # Check if the client is not already blacklisted
+#         if not instance.client.is_blacklisted:
+#             instance.client.is_blacklisted = True
+#             instance.client.save()
 
 
 # Notification signal handlers
-@receiver(post_save, sender=Order)
-def notify_order_status_change(sender, instance, created, **kwargs):
-    """Send notifications when order status changes"""
-    if not created and hasattr(instance, '_status_changed') and instance._status_changed:
-        old_status = getattr(instance, '_old_status', None)
-        if old_status and old_status != instance.status:
-            from core.notification_service import NotificationService
-            NotificationService.notify_order_status_change(
-                instance, old_status, instance.status, 
-                getattr(instance, '_changed_by_user', None)
-            )
+# @receiver(post_save, sender=Order)
+# def generate_order_number(sender, instance, created, **kwargs):
+#     """Generate order number when order is created"""
+#     if created and not instance.order_number:
+#         instance.generate_order_number()
+#         instance.save(update_fields=['order_number'])
+
+
+# @receiver(post_save, sender=Order)
+# def notify_order_status_change(sender, instance, created, **kwargs):
+#     """Send notifications when order status changes"""
+#     if not created and hasattr(instance, '_status_changed') and instance._status_changed:
+#         old_status = getattr(instance, '_old_status', None)
+#         if old_status and old_status != instance.status:
+#             from core.notification_service import NotificationService
+#             NotificationService.notify_order_status_change(
+#                 instance, old_status, instance.status, 
+#                 getattr(instance, '_changed_by_user', None)
+#             )
 
 
 @receiver(post_save, sender=Livrable)
@@ -798,9 +841,9 @@ def notify_livrable_accepted(sender, instance, created, **kwargs):
         NotificationService.notify_livrable_accepted(instance)
 
 
-@receiver(post_save, sender=Order)
-def notify_order_completed(sender, instance, created, **kwargs):
-    """Notify users when order is completed"""
-    if not created and instance.status.name.lower() == 'completed':
-        from core.notification_service import NotificationService
-        NotificationService.notify_order_completed(instance)
+# @receiver(post_save, sender=Order)
+# def notify_order_completed(sender, instance, created, **kwargs):
+#     """Notify users when order is completed"""
+#     if not created and instance.status.name.lower() == 'completed':
+#         from core.notification_service import NotificationService
+#         NotificationService.notify_order_completed(instance)

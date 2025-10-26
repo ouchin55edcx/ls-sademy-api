@@ -1276,6 +1276,226 @@ class ClientOrderCreateSerializer(serializers.ModelSerializer):
         return super().create(validated_data)
 
 
+class OrderCreateSerializer(serializers.Serializer):
+    """
+    Serializer for public order creation API with WhatsApp notifications
+    """
+    # Required fields
+    service = serializers.CharField(
+        help_text="Service type identifier (e.g., 'full-website', 'logo-design')"
+    )
+    projectDescription = serializers.CharField(
+        source='quotation',
+        min_length=50,
+        help_text="Detailed project description (minimum 50 characters)"
+    )
+    deadline = serializers.DateField(
+        source='deadline_date',
+        help_text="Project deadline in YYYY-MM-DD format"
+    )
+    fullName = serializers.CharField(
+        max_length=150,
+        help_text="Client's full name"
+    )
+    email = serializers.EmailField(
+        help_text="Client's email address"
+    )
+    phone = serializers.CharField(
+        max_length=20,
+        help_text="Client's phone number in E.164 format (e.g., +212XXXXXXXXX)"
+    )
+    acceptTerms = serializers.BooleanField(
+        write_only=True,
+        help_text="Must be true to accept terms of service"
+    )
+    
+    # Optional fields
+    technicalRequirements = serializers.CharField(
+        source='lecture',
+        required=False,
+        allow_blank=True,
+        help_text="Technical requirements and specifications"
+    )
+    budget = serializers.DecimalField(
+        source='total_price',
+        max_digits=10,
+        decimal_places=2,
+        required=False,
+        allow_null=True,
+        help_text="Optional budget suggestion (leave empty for quote)"
+    )
+    companyName = serializers.CharField(
+        max_length=200,
+        required=False,
+        allow_blank=True,
+        help_text="Client's company name"
+    )
+    receiveUpdates = serializers.BooleanField(
+        default=True,
+        help_text="Whether to receive updates about the order"
+    )
+    
+    # Service mapping
+    SERVICE_MAPPING = {
+        'logo-design': 1,
+        'brand-identity': 2,
+        'full-website': 3,
+        'pitch-deck': 4,
+        'social-media-assets': 5,
+        'other': 6
+    }
+    
+    def validate_service(self, value):
+        """Validate service string and map to service_id"""
+        if value not in self.SERVICE_MAPPING:
+            raise serializers.ValidationError(
+                f"Invalid service. Must be one of: {', '.join(self.SERVICE_MAPPING.keys())}"
+            )
+        return value
+    
+    def validate_acceptTerms(self, value):
+        """Validate that terms are accepted"""
+        if not value:
+            raise serializers.ValidationError("You must accept the terms of service.")
+        return value
+    
+    def validate_deadline(self, value):
+        """Validate deadline is in the future"""
+        from django.utils import timezone
+        # Convert to date for comparison
+        if hasattr(value, 'date'):
+            value_date = value.date()
+        else:
+            value_date = value
+        
+        if value_date <= timezone.now().date():
+            raise serializers.ValidationError("Deadline must be in the future.")
+        return value
+    
+    def validate_phone(self, value):
+        """Validate phone number format"""
+        if not value:
+            raise serializers.ValidationError("Phone number is required.")
+        
+        # Basic E.164 format validation for Morocco (+212)
+        if not value.startswith('+212') or len(value) != 13:
+            raise serializers.ValidationError(
+                "Phone number must be in E.164 format starting with +212 (e.g., +212XXXXXXXXX)"
+            )
+        
+        # Check if all characters after + are digits
+        if not value[1:].isdigit():
+            raise serializers.ValidationError("Phone number must contain only digits after the + sign.")
+        
+        return value
+    
+    def validate_budget(self, value):
+        """Validate budget if provided"""
+        if value is not None and value <= 0:
+            raise serializers.ValidationError("Budget must be greater than 0 if provided.")
+        return value
+    
+    def create(self, validated_data):
+        """Create order and client if needed"""
+        from core.models import Order, Client, User, Service, Status
+        from django.utils import timezone
+        
+        # Extract client data
+        email = validated_data['email']
+        full_name = validated_data['fullName']
+        phone = validated_data['phone']
+        company_name = validated_data.get('companyName', '')
+        
+        # Get or create client
+        try:
+            user = User.objects.get(email=email)
+            client = user.client_profile
+        except User.DoesNotExist:
+            # Create new user and client
+            user = User.objects.create_user(
+                username=email,  # Use email as username
+                email=email,
+                first_name=full_name.split(' ')[0] if ' ' in full_name else full_name,
+                last_name=' '.join(full_name.split(' ')[1:]) if ' ' in full_name else '',
+                phone=phone
+            )
+            client = Client.objects.create(user=user)
+        
+        # Update client info if needed
+        if not user.phone:
+            user.phone = phone
+            user.save(update_fields=['phone'])
+        
+        # Get service
+        service_id = self.SERVICE_MAPPING[validated_data['service']]
+        try:
+            service = Service.objects.get(id=service_id, is_active=True)
+        except Service.DoesNotExist:
+            raise serializers.ValidationError("Selected service is not available.")
+        
+        # Get pending status
+        try:
+            status = Status.objects.get(name='pending')
+        except Status.DoesNotExist:
+            raise serializers.ValidationError("System error: Pending status not found.")
+        
+        # Convert date to datetime (end of day)
+        from django.utils import timezone
+        from datetime import datetime, time, date
+        deadline_date = validated_data['deadline_date']
+        if isinstance(deadline_date, date) and not isinstance(deadline_date, datetime):
+            # It's a date object, convert to datetime
+            naive_datetime = datetime.combine(deadline_date, time.max)
+            deadline_datetime = timezone.make_aware(naive_datetime)
+        else:
+            # It's already a datetime object
+            deadline_datetime = deadline_date
+        
+        # Prepare order data
+        order_data = {
+            'client': client,
+            'service': service,
+            'status': status,
+            'deadline_date': deadline_datetime,
+            'quotation': validated_data['quotation'],
+            'lecture': validated_data.get('lecture', ''),
+            'total_price': validated_data.get('total_price', 0.01),  # Minimum required
+        }
+        
+        # Create order
+        order = Order.objects.create(**order_data)
+        
+        # Generate order number if not set
+        if not order.order_number:
+            order.generate_order_number()
+            order.save(update_fields=['order_number'])
+        
+        return order
+
+
+class OrderCreateResponseSerializer(serializers.ModelSerializer):
+    """
+    Serializer for order creation response
+    """
+    order_number = serializers.CharField(read_only=True)
+    status_name = serializers.CharField(source='status.name', read_only=True)
+    service_name = serializers.CharField(source='service.name', read_only=True)
+    created_at = serializers.DateTimeField(source='date', read_only=True)
+    
+    class Meta:
+        model = Order
+        fields = [
+            'id',
+            'order_number',
+            'status',
+            'status_name',
+            'service',
+            'service_name',
+            'deadline_date',
+            'created_at'
+        ]
+
+
 class ActiveCollaboratorListSerializer(serializers.ModelSerializer):
     """
     Serializer for listing active collaborators (for assignment dropdown)

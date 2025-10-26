@@ -64,6 +64,8 @@ from core.views import (
     ChatbotSessionCreateAPIView,
     ChatbotSessionUpdateAPIView,
     ChatbotClientRegistrationAPIView,
+    # Public Order Creation
+    OrderCreateAPIView,
     ChatbotOrderReviewAPIView,
     ChatbotOrderConfirmationAPIView
 )
@@ -173,6 +175,9 @@ urlpatterns = [
     path('chatbot/register/', ChatbotClientRegistrationAPIView.as_view(), name='chatbot-client-registration'),
     path('chatbot/confirm/', ChatbotOrderConfirmationAPIView.as_view(), name='chatbot-order-confirmation'),
     path('orders/review/', ChatbotOrderReviewAPIView.as_view(), name='chatbot-order-review'),
+    
+    # Public Order Creation (Public endpoint)
+    path('orders/create/', OrderCreateAPIView.as_view(), name='order-create'),
     
     # Services and Templates for Chatbot (Public endpoints)
     path('templates/', ChatbotTemplateListAPIView.as_view(), name='chatbot-templates-list'),
