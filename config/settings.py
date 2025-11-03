@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 from pathlib import Path
+import os
 from decouple import config, Csv # Build paths inside the project like this: BASE_DIR / 'subdir'.
 from urllib.parse import urlparse
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -120,8 +121,26 @@ mysql_url = config('MYSQL_URL', default='')
 if mysql_url:
     # Parse MySQL URL: mysql://user:password@host:port/database
     parsed = urlparse(mysql_url)
-    db_host = parsed.hostname if parsed.hostname else config('DB_HOST', default='localhost')
+    db_host = parsed.hostname if parsed.hostname else config('DB_HOST', default=None)
     db_port = str(parsed.port) if parsed.port else config('DB_PORT', default='3306')
+    
+    # If no host specified, try to detect from environment or use safe default
+    if not db_host:
+        # Check if we're in a containerized environment
+        # Common indicators: Kubernetes, Docker, or other container platforms
+        is_containerized = any([
+            os.getenv('KUBERNETES_SERVICE_HOST'),
+            os.getenv('DOCKER_HOST'),
+            os.getenv('CONTAINER_ID'),
+            os.path.exists('/.dockerenv'),
+        ])
+        
+        if is_containerized:
+            # In containerized environments, default to common service names
+            db_host = config('DB_HOST', default='mysql')  # Common service name
+        else:
+            # Local development - use 127.0.0.1 to force TCP/IP (not Unix socket)
+            db_host = '127.0.0.1'
     
     # Force TCP/IP connection by converting 'localhost' to '127.0.0.1'
     # This prevents MySQLdb from trying to use Unix socket
@@ -142,8 +161,25 @@ if mysql_url:
     }
 else:
     # Fallback to individual environment variables
-    db_host = config('DB_HOST', default='localhost')
+    db_host = config('DB_HOST', default=None)
     db_port = config('DB_PORT', default='3306')
+    
+    # If no host specified, try to detect from environment or use safe default
+    if not db_host:
+        # Check if we're in a containerized environment
+        is_containerized = any([
+            os.getenv('KUBERNETES_SERVICE_HOST'),
+            os.getenv('DOCKER_HOST'),
+            os.getenv('CONTAINER_ID'),
+            os.path.exists('/.dockerenv'),
+        ])
+        
+        if is_containerized:
+            # In containerized environments, default to common service names
+            db_host = 'mysql'  # Common service name in Docker/Kubernetes
+        else:
+            # Local development - use 127.0.0.1 to force TCP/IP (not Unix socket)
+            db_host = '127.0.0.1'
     
     # Force TCP/IP connection by converting 'localhost' to '127.0.0.1'
     # This prevents MySQLdb from trying to use Unix socket
