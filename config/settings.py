@@ -120,13 +120,21 @@ mysql_url = config('MYSQL_URL', default='')
 if mysql_url:
     # Parse MySQL URL: mysql://user:password@host:port/database
     parsed = urlparse(mysql_url)
+    db_host = parsed.hostname if parsed.hostname else config('DB_HOST', default='localhost')
+    db_port = str(parsed.port) if parsed.port else config('DB_PORT', default='3306')
+    
+    # Force TCP/IP connection by converting 'localhost' to '127.0.0.1'
+    # This prevents MySQLdb from trying to use Unix socket
+    if db_host == 'localhost':
+        db_host = '127.0.0.1'
+    
     db_config = {
         'ENGINE': config('DB_ENGINE', default='django.db.backends.mysql'),
         'NAME': parsed.path.lstrip('/') if parsed.path else config('DB_NAME', default='sademiy_db'),
         'USER': parsed.username if parsed.username else config('DB_USER', default='root'),
         'PASSWORD': parsed.password if parsed.password else config('DB_PASSWORD', default=''),
-        'HOST': parsed.hostname if parsed.hostname else config('DB_HOST', default='localhost'),
-        'PORT': str(parsed.port) if parsed.port else config('DB_PORT', default='3306'),
+        'HOST': db_host,
+        'PORT': db_port,
         'OPTIONS': {
             'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
             'charset': 'utf8mb4',
@@ -134,13 +142,21 @@ if mysql_url:
     }
 else:
     # Fallback to individual environment variables
+    db_host = config('DB_HOST', default='localhost')
+    db_port = config('DB_PORT', default='3306')
+    
+    # Force TCP/IP connection by converting 'localhost' to '127.0.0.1'
+    # This prevents MySQLdb from trying to use Unix socket
+    if db_host == 'localhost':
+        db_host = '127.0.0.1'
+    
     db_config = {
         'ENGINE': config('DB_ENGINE', default='django.db.backends.mysql'),
         'NAME': config('DB_NAME', default='sademiy_db'),
         'USER': config('DB_USER', default='root'),
         'PASSWORD': config('DB_PASSWORD', default=''),
-        'HOST': config('DB_HOST', default='localhost'),
-        'PORT': config('DB_PORT', default='3306'),
+        'HOST': db_host,
+        'PORT': db_port,
         'OPTIONS': {
             'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
             'charset': 'utf8mb4',
