@@ -133,6 +133,10 @@ if mysql_url:
             os.getenv('DOCKER_HOST'),
             os.getenv('CONTAINER_ID'),
             os.path.exists('/.dockerenv'),
+            os.path.exists('/.dockerinit'),
+            (os.getenv('HOSTNAME') or '').startswith('k8s'),
+            # Check if running in a container by examining common paths
+            os.path.exists('/app') and os.path.exists('/app/.venv'),
         ])
         
         if is_containerized:
@@ -172,6 +176,10 @@ else:
             os.getenv('DOCKER_HOST'),
             os.getenv('CONTAINER_ID'),
             os.path.exists('/.dockerenv'),
+            os.path.exists('/.dockerinit'),
+            (os.getenv('HOSTNAME') or '').startswith('k8s'),
+            # Check if running in a container by examining common paths
+            os.path.exists('/app') and os.path.exists('/app/.venv'),
         ])
         
         if is_containerized:
