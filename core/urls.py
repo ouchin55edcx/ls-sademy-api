@@ -61,6 +61,8 @@ from core.views import (
     ChatbotServiceListAPIView,
     ChatbotServiceDetailAPIView,
     ChatbotTemplateListAPIView,
+    CollaboratorTemplateListAPIView,
+    CollaboratorTemplateDownloadAPIView,
     ChatbotSessionCreateAPIView,
     ChatbotSessionUpdateAPIView,
     ChatbotClientRegistrationAPIView,
@@ -129,6 +131,10 @@ urlpatterns = [
     path('collaborator/statuses/', StatusListAPIView.as_view(), name='collaborator-statuses-list'),
     path('collaborator/status/', CollaboratorStatusAPIView.as_view(), name='collaborator-status'),
     path('collaborator/statistics/', CollaboratorStatisticsAPIView.as_view(), name='collaborator-statistics'),
+    
+    # Collaborator - Template Management (Collaborator Only)
+    path('collaborator/templates/', CollaboratorTemplateListAPIView.as_view(), name='collaborator-templates-list'),
+    path('collaborator/templates/<int:pk>/download/', CollaboratorTemplateDownloadAPIView.as_view(), name='collaborator-template-download'),
     
     # Client - Order Management (Client Only)
     path('client/orders/', ClientOrderListAPIView.as_view(), name='client-orders-list'),

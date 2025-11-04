@@ -122,6 +122,17 @@ class TemplateCreateUpdateSerializer(serializers.ModelSerializer):
         return value
 
 
+class CollaboratorTemplateSerializer(serializers.ModelSerializer):
+    """
+    Template serializer for collaborators - only title, file, and service_id
+    """
+    service_id = serializers.IntegerField(source='service.id', read_only=True)
+    
+    class Meta:
+        model = Template
+        fields = ['id', 'title', 'file', 'service_id']
+
+
 class ReviewSerializer(serializers.ModelSerializer):
     """
     Review serializer for displaying reviews
@@ -1282,7 +1293,7 @@ class OrderCreateSerializer(serializers.Serializer):
     """
     # Required fields
     service = serializers.CharField(
-        help_text="Service type identifier (e.g., 'full-website', 'logo-design')"
+        help_text="Service type identifier (e.g., 'full-website', 'logo-design') or service ID (e.g., '1', '2', '3')"
     )
     projectDescription = serializers.CharField(
         source='quotation',
@@ -1346,12 +1357,27 @@ class OrderCreateSerializer(serializers.Serializer):
     }
     
     def validate_service(self, value):
-        """Validate service string and map to service_id"""
-        if value not in self.SERVICE_MAPPING:
-            raise serializers.ValidationError(
-                f"Invalid service. Must be one of: {', '.join(self.SERVICE_MAPPING.keys())}"
-            )
-        return value
+        """Validate service string key or service ID"""
+        from core.models import Service
+        
+        # Check if it's a valid string key
+        if value in self.SERVICE_MAPPING:
+            return value
+        
+        # Check if it's a valid service ID (as string or try to convert to int)
+        try:
+            service_id = int(value)
+            # Check if service exists and is active
+            if Service.objects.filter(id=service_id, is_active=True).exists():
+                return str(service_id)  # Return as string for consistency
+        except (ValueError, TypeError):
+            pass
+        
+        # If neither valid, raise error
+        valid_keys = ', '.join(self.SERVICE_MAPPING.keys())
+        raise serializers.ValidationError(
+            f"Invalid service. Must be one of: {valid_keys}, or a valid active service ID"
+        )
     
     def validate_acceptTerms(self, value):
         """Validate that terms are accepted"""
@@ -1426,8 +1452,15 @@ class OrderCreateSerializer(serializers.Serializer):
             user.phone = phone
             user.save(update_fields=['phone'])
         
-        # Get service
-        service_id = self.SERVICE_MAPPING[validated_data['service']]
+        # Get service - handle both string keys and service IDs
+        service_value = validated_data['service']
+        if service_value in self.SERVICE_MAPPING:
+            # It's a string key, use the mapping
+            service_id = self.SERVICE_MAPPING[service_value]
+        else:
+            # It's a service ID (already validated in validate_service)
+            service_id = int(service_value)
+        
         try:
             service = Service.objects.get(id=service_id, is_active=True)
         except Service.DoesNotExist:
@@ -1451,26 +1484,65 @@ class OrderCreateSerializer(serializers.Serializer):
             # It's already a datetime object
             deadline_datetime = deadline_date
         
-        # Prepare order data
-        order_data = {
-            'client': client,
-            'service': service,
-            'status': status,
-            'deadline_date': deadline_datetime,
-            'quotation': validated_data['quotation'],
-            'lecture': validated_data.get('lecture', ''),
-            'total_price': validated_data.get('total_price', 0.01),  # Minimum required
-        }
+        # Generate order number before creating order to avoid unique constraint violation
+        from django.db import transaction, IntegrityError
         
-        # Create order
-        order = Order.objects.create(**order_data)
+        current_year = timezone.now().year
         
-        # Generate order number if not set
-        if not order.order_number:
-            order.generate_order_number()
-            order.save(update_fields=['order_number'])
+        # Use database transaction with retry mechanism to handle race conditions
+        max_retries = 5
+        for attempt in range(max_retries):
+            try:
+                with transaction.atomic():
+                    # Get the highest order number for this year
+                    # Use order_by to get the last order, then lock it
+                    last_order_obj = Order.objects.filter(
+                        order_number__startswith=f'ORD-{current_year}-'
+                    ).order_by('-order_number').first()
+                    
+                    if last_order_obj:
+                        # Extract the number part and increment
+                        last_number = int(last_order_obj.order_number.split('-')[-1])
+                        new_number = last_number + 1
+                    else:
+                        # First order of the year
+                        new_number = 1
+                    
+                    # Format as ORD-YYYY-NNNN
+                    order_number = f'ORD-{current_year}-{new_number:04d}'
+                    
+                    # Prepare order data
+                    order_data = {
+                        'client': client,
+                        'service': service,
+                        'status': status,
+                        'deadline_date': deadline_datetime,
+                        'quotation': validated_data['quotation'],
+                        'lecture': validated_data.get('lecture', ''),
+                        'total_price': validated_data.get('total_price', 0.01),  # Minimum required
+                        'order_number': order_number,  # Set order number before creation
+                    }
+                    
+                    # Create order
+                    order = Order.objects.create(**order_data)
+                    return order
+                    
+            except IntegrityError as e:
+                # If it's a unique constraint violation, retry with a new number
+                if attempt < max_retries - 1:
+                    continue  # Retry with a new number
+                else:
+                    raise serializers.ValidationError(
+                        "Failed to create order due to a conflict. Please try again."
+                    )
+            except Exception as e:
+                # For other errors, raise immediately
+                raise
         
-        return order
+        # Fallback: should not reach here, but just in case
+        raise serializers.ValidationError(
+            "Failed to create order after multiple attempts. Please try again."
+        )
 
 
 class OrderCreateResponseSerializer(serializers.ModelSerializer):

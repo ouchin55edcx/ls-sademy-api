@@ -21,7 +21,7 @@ from core.serializers import (
     ServiceDetailSerializer, AllReviewsSerializer, ReviewSerializer, ReviewCreateUpdateSerializer,
     UserListSerializer, CreateCollaboratorSerializer, CreateCollaboratorAdminSerializer, DeactivateUserSerializer,
     ServiceCreateUpdateSerializer, ServiceAdminListSerializer, ServiceToggleActiveSerializer,
-    TemplateSerializer, TemplateCreateUpdateSerializer,
+    TemplateSerializer, TemplateCreateUpdateSerializer, CollaboratorTemplateSerializer,
     OrderListSerializer, OrderCreateUpdateSerializer, OrderDetailSerializer,
     OrderStatusUpdateSerializer, OrderCancelSerializer, OrderCollaboratorAssignSerializer,
     ClientOrderCreateSerializer,
@@ -3234,6 +3234,79 @@ class ChatbotTemplateListAPIView(generics.ListAPIView):
         if service_id:
             return Template.objects.filter(service_id=service_id)
         return Template.objects.none()
+
+
+class CollaboratorTemplateListAPIView(generics.ListAPIView):
+    """
+    GET /api/collaborator/templates/
+    
+    Get templates with files only (no videos) for collaborators
+    Returns only templates that have files (not demo videos)
+    
+    Query parameters:
+    - service_id: Filter by service ID (optional)
+    
+    Examples:
+    - GET /api/collaborator/templates/ - Get all templates with files
+    - GET /api/collaborator/templates/?service_id=1 - Get templates for service ID 1
+    """
+    permission_classes = [IsAuthenticated, IsCollaboratorUser]
+    serializer_class = CollaboratorTemplateSerializer
+    
+    def get_queryset(self):
+        """Return templates that have files (not null) and exclude demo_video"""
+        queryset = Template.objects.filter(
+            file__isnull=False
+        ).exclude(
+            file=''
+        ).select_related('service').order_by('title')
+        
+        # Filter by service_id if provided
+        service_id = self.request.query_params.get('service_id')
+        if service_id:
+            queryset = queryset.filter(service_id=service_id)
+        
+        return queryset
+
+
+class CollaboratorTemplateDownloadAPIView(APIView):
+    """
+    GET /api/collaborator/templates/{id}/download/
+    
+    Download template file (collaborator only)
+    """
+    permission_classes = [IsAuthenticated, IsCollaboratorUser]
+    
+    def get(self, request, pk):
+        """Download the template file"""
+        template = get_object_or_404(Template, pk=pk)
+        
+        # Check if template has a file
+        if not template.file:
+            return Response(
+                {'error': 'No file available for this template.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        try:
+            file_path = template.file.path
+            if not os.path.exists(file_path):
+                return Response(
+                    {'error': 'File not found on server.'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            with open(file_path, 'rb') as file:
+                response = HttpResponse(file.read(), content_type='application/octet-stream')
+                response['Content-Disposition'] = f'attachment; filename="{template.file.name}"'
+                return response
+                
+        except Exception as e:
+            logging.error(f"Error downloading template file: {str(e)}")
+            return Response(
+                {'error': 'Error reading file.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 class ChatbotSessionCreateAPIView(APIView):
