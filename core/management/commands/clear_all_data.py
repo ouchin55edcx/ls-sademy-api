@@ -1,48 +1,47 @@
 """
-Django Management Command to clear all data except admin users
-Run with: python manage.py clear_all_data
+Django Management Command to clear all data from the database
+Run with: python manage.py clear_all_data --confirm
 """
 
 from django.core.management.base import BaseCommand
 from django.contrib.auth import get_user_model
 from core.models import (
     Admin, Collaborator, Client, Service, Template, Status, 
-    Order, Livrable, Review, OrderStatusHistory, GlobalSettings
+    Order, Livrable, Review, OrderStatusHistory, GlobalSettings,
+    ChatbotSession, Notification, Language
 )
 
 User = get_user_model()
 
 
 class Command(BaseCommand):
-    help = 'Clears all data from all tables except admin users'
+    help = 'Clears ALL data from ALL tables (including admin users)'
 
     def add_arguments(self, parser):
         parser.add_argument(
             '--confirm',
             action='store_true',
-            help='Confirm that you want to delete all data except admin users',
+            help='Confirm that you want to delete ALL data (including admin users)',
         )
 
     def handle(self, *args, **options):
         if not options['confirm']:
             self.stdout.write(
                 self.style.ERROR(
-                    'This command will delete ALL data except admin users!\n'
+                    '⚠️  WARNING: This command will delete ALL data including admin users!\n'
+                    'This action cannot be undone!\n'
                     'Use --confirm flag to proceed.\n'
                     'Example: python manage.py clear_all_data --confirm'
                 )
             )
             return
 
-        self.stdout.write('Starting data cleanup...')
-        
-        # Get admin users to preserve
-        admin_users = User.objects.filter(admin_profile__isnull=False)
-        admin_usernames = [user.username for user in admin_users]
-        
-        self.stdout.write(f'Preserving {len(admin_users)} admin users: {", ".join(admin_usernames)}')
+        self.stdout.write('Starting complete data cleanup...')
         
         # Clear data in reverse dependency order to avoid foreign key constraints
+        self.stdout.write('Clearing notifications...')
+        Notification.objects.all().delete()
+        
         self.stdout.write('Clearing reviews...')
         Review.objects.all().delete()
         
@@ -55,6 +54,9 @@ class Command(BaseCommand):
         self.stdout.write('Clearing orders...')
         Order.objects.all().delete()
         
+        self.stdout.write('Clearing chatbot sessions...')
+        ChatbotSession.objects.all().delete()
+        
         self.stdout.write('Clearing statuses...')
         Status.objects.all().delete()
         
@@ -64,33 +66,31 @@ class Command(BaseCommand):
         self.stdout.write('Clearing services...')
         Service.objects.all().delete()
         
+        self.stdout.write('Clearing languages...')
+        Language.objects.all().delete()
+        
         self.stdout.write('Clearing clients...')
         Client.objects.all().delete()
         
         self.stdout.write('Clearing collaborators...')
         Collaborator.objects.all().delete()
         
-        # Clear all non-admin users
-        self.stdout.write('Clearing non-admin users...')
-        non_admin_users = User.objects.exclude(admin_profile__isnull=False)
-        non_admin_count = non_admin_users.count()
-        non_admin_users.delete()
-        self.stdout.write(f'Deleted {non_admin_count} non-admin users')
+        self.stdout.write('Clearing admins...')
+        Admin.objects.all().delete()
         
-        # Keep GlobalSettings as they are configuration data
-        self.stdout.write('Preserving GlobalSettings...')
+        self.stdout.write('Clearing global settings...')
+        GlobalSettings.objects.all().delete()
         
-        # Verify admin users are still there
-        remaining_admin_users = User.objects.filter(admin_profile__isnull=False)
-        self.stdout.write(f'Remaining admin users: {remaining_admin_users.count()}')
-        
-        for admin in remaining_admin_users:
-            self.stdout.write(f'  ✓ {admin.username} ({admin.email})')
+        # Clear ALL users (including admin users)
+        self.stdout.write('Clearing ALL users...')
+        user_count = User.objects.count()
+        User.objects.all().delete()
+        self.stdout.write(f'Deleted {user_count} users (including admins)')
         
         self.stdout.write(
             self.style.SUCCESS(
-                f'Data cleanup completed successfully!\n'
-                f'Preserved {remaining_admin_users.count()} admin users.\n'
-                f'All other data has been cleared.'
+                f'\n✅ Data cleanup completed successfully!\n'
+                f'All data has been deleted from the database.\n'
+                f'The database is now empty.'
             )
         )

@@ -344,8 +344,8 @@ class LivrableCreateUpdateSerializer(serializers.ModelSerializer):
             if value.size > max_size:
                 raise serializers.ValidationError('File size cannot exceed 50MB.')
             
-            # Check file extension
-            allowed_extensions = ['.pdf', '.doc', '.docx', '.txt', '.zip', '.rar', '.jpg', '.jpeg', '.png', '.gif', '.mp4', '.avi', '.mov']
+            # Check file extension - ADD .ppt and .pptx here
+            allowed_extensions = ['.pdf', '.doc', '.docx', '.txt', '.zip', '.rar', '.jpg', '.jpeg', '.png', '.gif', '.mp4', '.avi', '.mov', '.ppt', '.pptx']
             file_extension = value.name.lower().split('.')[-1]
             if f'.{file_extension}' not in allowed_extensions:
                 raise serializers.ValidationError(

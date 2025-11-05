@@ -2048,12 +2048,13 @@ class CollaboratorLivrableListCreateAPIView(generics.ListCreateAPIView):
                 if order.client and order.client.user:
                     NotificationService.create_notification(
                         user=order.client.user,
-                        notification_type='livrable_submitted',
+                        notification_type='livrable_uploaded',
                         title=f'New Deliverable Available - Order #{order.id}',
                         message=f'A new deliverable "{livrable.name}" has been submitted for your Order #{order.id} and is ready for review',
                         priority='medium',
                         order=order,
-                        livrable=livrable
+                        livrable=livrable,
+                        send_email=True  # ADD: Explicitly enable email sending
                     )
             except Exception as e:
                 logging.error(f"Failed to create livrable notifications: {str(e)}")
@@ -3800,6 +3801,44 @@ class OrderCreateAPIView(APIView):
             
             # System notifications are always created, so order is successful
             response_data['message'] = 'Order created successfully with system notifications'
+            
+            # Check if serializer created a new user (add this tracking in serializer)
+            # For now, we'll check if user was created recently (within last minute)
+            from django.utils import timezone
+            from datetime import timedelta
+            
+            client_user = order.client.user
+            recently_created = client_user.date_joined > timezone.now() - timedelta(minutes=1)
+            
+            # Send login credentials email if user was just created
+            credentials_email_sent = False
+            if recently_created:
+                # Generate password for new user
+                import secrets
+                import string
+                password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(12))
+                
+                # Set password
+                client_user.set_password(password)
+                client_user.save()
+                
+                # Send credentials email
+                try:
+                    from core.email_service import EmailService
+                    credentials_email_sent = EmailService.send_client_credentials(client_user, password)
+                    logger.info(f"Credentials email sent to {client_user.email}: {credentials_email_sent}")
+                except Exception as e:
+                    logger.error(f"Failed to send credentials email: {str(e)}")
+            
+            # Update response to include credentials email status
+            response_data = {
+                'success': True,
+                'message': 'Order created successfully',
+                'data': response_serializer.data,
+                'notifications': notifications,
+                'credentials_email_sent': credentials_email_sent  # Add this
+            }
+            
             return Response(response_data, status=status.HTTP_201_CREATED)
                 
         except Exception as e:
