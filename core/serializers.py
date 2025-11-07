@@ -1594,14 +1594,52 @@ class ProfileUpdateSerializer(serializers.ModelSerializer):
     
     def validate_email(self, value):
         """Validate email uniqueness"""
-        if value and User.objects.filter(email=value).exclude(pk=self.instance.pk).exists():
-            raise serializers.ValidationError('A user with this email already exists.')
+        # Strip whitespace and handle empty values
+        if value:
+            value = value.strip().lower()  # Normalize email to lowercase
+            if not value:  # Empty string after stripping
+                value = None
+        
+        # Only validate uniqueness if email is provided and different from current
+        if value and self.instance:
+            # Check if email is actually being changed
+            current_email = self.instance.email
+            if current_email:
+                current_email = current_email.strip().lower()
+            
+            # If email hasn't changed, no need to validate
+            if value == current_email:
+                return value
+            
+            # Check if another user has this email
+            if User.objects.filter(email=value).exclude(pk=self.instance.pk).exists():
+                raise serializers.ValidationError('A user with this email already exists.')
+        
         return value
     
     def validate_phone(self, value):
         """Validate phone uniqueness"""
-        if value and User.objects.filter(phone=value).exclude(pk=self.instance.pk).exists():
-            raise serializers.ValidationError('A user with this phone number already exists.')
+        # Strip whitespace and handle empty values
+        if value:
+            value = value.strip()
+            if not value:  # Empty string after stripping
+                value = None
+        
+        # Only validate uniqueness if phone is provided and different from current
+        if value and self.instance:
+            # Check if phone is actually being changed
+            current_phone = self.instance.phone
+            if current_phone:
+                current_phone = current_phone.strip()
+            
+            # If phone hasn't changed, no need to validate
+            if value == current_phone:
+                return value
+            
+            # Check if another user has this phone number
+            if User.objects.filter(phone=value).exclude(pk=self.instance.pk).exists():
+                raise serializers.ValidationError('A user with this phone number already exists.')
+        
         return value
 
 
