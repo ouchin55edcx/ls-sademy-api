@@ -9,13 +9,29 @@ from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.authtoken.models import Token
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import login, get_user_model
 from django.db import models
 from django.http import HttpResponse, Http404, FileResponse
 from django.shortcuts import get_object_or_404
 from django.conf import settings
+from decimal import Decimal
 import os
-from core.models import Service, Review, Template, Order, Status, Collaborator, Livrable, OrderStatusHistory, GlobalSettings, Language, ChatbotSession, Client
+from core.models import (
+    Service,
+    Review,
+    Template,
+    Order,
+    Status,
+    Collaborator,
+    Livrable,
+    OrderStatusHistory,
+    GlobalSettings,
+    Language,
+    ChatbotSession,
+    Client,
+    ServiceCollaboratorCommission,
+)
 from core.serializers import (
     LoginSerializer, UserSerializer, ServiceListSerializer,
     ServiceDetailSerializer, AllReviewsSerializer, ReviewSerializer, ReviewCreateUpdateSerializer,
@@ -28,7 +44,8 @@ from core.serializers import (
     StatusSerializer, ActiveCollaboratorListSerializer, OrderStatusHistorySerializer,
     LivrableCreateUpdateSerializer, LivrableListSerializer, LivrableDetailSerializer,
     LivrableAcceptRejectSerializer, LivrableAdminReviewSerializer, ProfileUpdateSerializer,
-    GlobalSettingsSerializer, NotificationSerializer, NotificationListSerializer, NotificationStatsSerializer,
+    GlobalSettingsSerializer, ServiceCollaboratorCommissionSerializer,
+    NotificationSerializer, NotificationListSerializer, NotificationStatsSerializer,
     LanguageSerializer, ChatbotSessionSerializer, ChatbotSessionCreateSerializer,
     ChatbotSessionUpdateSerializer, ChatbotClientRegistrationSerializer,
     ChatbotOrderReviewSerializer, ChatbotOrderConfirmationSerializer, ChatbotOrderResponseSerializer
@@ -54,6 +71,8 @@ class LoginAPIView(APIView):
     Response:
     {
         "token": "your-auth-token",
+        "access": "your-jwt-access-token",
+        "refresh": "your-jwt-refresh-token",
         "user": {
             "id": 1,
             "username": "client1",
@@ -85,11 +104,18 @@ class LoginAPIView(APIView):
             # Create or get token
             token, created = Token.objects.get_or_create(user=user)
             
+            # Generate JWT tokens
+            refresh = RefreshToken.for_user(user)
+            access_token = str(refresh.access_token)
+            refresh_token = str(refresh)
+            
             # Login user
             login(request, user)
             
             return Response({
                 'token': token.key,
+                'access': access_token,
+                'refresh': refresh_token,
                 'user': UserSerializer(user).data,
                 'message': 'Login successful'
             }, status=status.HTTP_200_OK)
@@ -962,11 +988,15 @@ class OrderListCreateAPIView(generics.ListCreateAPIView):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         order = serializer.save()
+
+        order.apply_global_commission_settings()
+        order.apply_collaborator_commission_settings()
+        order.save()
         
-        # Apply global commission settings if not explicitly set
-        if not order.commission_type or not order.commission_value:
-            order.apply_global_commission_settings()
-            order.save()
+        # Apply commission settings defaults and compute payout amounts
+        order.apply_global_commission_settings()
+        order.apply_collaborator_commission_settings()
+        order.save()
         
         # Send email notification if collaborator is assigned
         email_sent = False
@@ -1045,6 +1075,12 @@ class OrderRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):
         if self.request.method == 'GET':
             return OrderDetailSerializer
         return OrderCreateUpdateSerializer
+
+    def perform_update(self, serializer):
+        order = serializer.save()
+        order.apply_global_commission_settings()
+        order.apply_collaborator_commission_settings()
+        order.save()
     
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
@@ -1243,6 +1279,13 @@ class OrderCollaboratorAssignAPIView(generics.UpdateAPIView):
         
         # Refresh instance to get updated collaborator
         instance.refresh_from_db()
+
+        instance.apply_collaborator_commission_settings()
+        instance.save(update_fields=[
+            'collaborator_commission_type',
+            'collaborator_commission_value',
+            'collaborator_commission_amount',
+        ])
         
         collaborator_name = "Unassigned"
         email_sent = False
@@ -1906,7 +1949,7 @@ class CollaboratorStatisticsAPIView(APIView):
         
         # Financial statistics (earnings from completed orders)
         completed_orders_queryset = orders.filter(status__name__icontains='completed')
-        total_earnings = completed_orders_queryset.aggregate(total=models.Sum('total_price'))['total'] or 0
+        total_earnings = completed_orders_queryset.aggregate(total=models.Sum('collaborator_commission_amount'))['total'] or 0
         average_order_value = round(float(total_earnings / completed_orders), 2) if completed_orders > 0 else 0
         
         # Livrables statistics
@@ -1929,7 +1972,7 @@ class CollaboratorStatisticsAPIView(APIView):
         for service in Service.objects.filter(orders__collaborator=collaborator).distinct():
             service_orders = orders.filter(service=service)
             service_earnings = service_orders.filter(status__name__icontains='completed').aggregate(
-                total=models.Sum('total_price')
+                total=models.Sum('collaborator_commission_amount')
             )['total'] or 0
             services_worked_on.append({
                 'service_name': service.name,
@@ -2727,7 +2770,7 @@ class AdminStatisticsAPIView(APIView):
             
             if completed_count > 0:
                 total_earnings = completed_collaborator_orders.aggregate(
-                    total=Sum('total_price')
+                    total=Sum('collaborator_commission_amount')
                 )['total'] or 0
                 
                 # Get average rating for this collaborator
@@ -2748,7 +2791,7 @@ class AdminStatisticsAPIView(APIView):
         collaborator_earnings = Order.objects.filter(
             collaborator__isnull=False,
             status__name__icontains='completed'
-        ).aggregate(total=Sum('total_price'))['total'] or 0
+        ).aggregate(total=Sum('collaborator_commission_amount'))['total'] or 0
         
         # Recent activity (last 10 orders)
         recent_orders = Order.objects.select_related(
@@ -2927,6 +2970,271 @@ class GlobalSettingsRetrieveUpdateAPIView(generics.RetrieveUpdateAPIView):
         self.perform_update(serializer)
         
         return Response(serializer.data)
+
+
+class ServiceCollaboratorCommissionMixin:
+    """
+    Shared helper for recalculating collaborator commission settings on existing orders
+    """
+
+    @staticmethod
+    def _recalculate_service_orders(service):
+        orders = Order.objects.filter(service=service)
+        update_fields = [
+            'collaborator_commission_type',
+            'collaborator_commission_value',
+            'collaborator_commission_amount',
+        ]
+
+        for order in orders:
+            # Reset to allow overrides to apply
+            order.collaborator_commission_value = Decimal('0.00')
+            order.apply_collaborator_commission_settings()
+            order.save(update_fields=update_fields)
+
+
+class ServiceCollaboratorCommissionListCreateAPIView(
+    ServiceCollaboratorCommissionMixin, generics.ListCreateAPIView
+):
+    """
+    GET /api/admin/collaborator-commissions/
+    POST /api/admin/collaborator-commissions/
+
+    Manage service-level collaborator commission overrides (admin only)
+    """
+
+    permission_classes = [IsAuthenticated, IsAdminUser]
+    serializer_class = ServiceCollaboratorCommissionSerializer
+    queryset = ServiceCollaboratorCommission.objects.select_related('service').all()
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        service_id = self.request.query_params.get('service')
+        is_active = self.request.query_params.get('is_active')
+
+        if service_id:
+            queryset = queryset.filter(service_id=service_id)
+
+        if is_active is not None:
+            is_active_value = is_active.lower() in ['true', '1', 'yes']
+            queryset = queryset.filter(is_active=is_active_value)
+
+        return queryset.order_by('service__name')
+
+    def perform_create(self, serializer):
+        instance = serializer.save()
+        self._recalculate_service_orders(instance.service)
+
+
+class ServiceCollaboratorCommissionRetrieveUpdateDestroyAPIView(
+    ServiceCollaboratorCommissionMixin, generics.RetrieveUpdateDestroyAPIView
+):
+    """
+    GET /api/admin/collaborator-commissions/{id}/
+    PUT /api/admin/collaborator-commissions/{id}/
+    PATCH /api/admin/collaborator-commissions/{id}/
+    DELETE /api/admin/collaborator-commissions/{id}/
+
+    Manage a specific service-level collaborator commission override (admin only)
+    """
+
+    permission_classes = [IsAuthenticated, IsAdminUser]
+    serializer_class = ServiceCollaboratorCommissionSerializer
+    queryset = ServiceCollaboratorCommission.objects.select_related('service').all()
+
+    def perform_update(self, serializer):
+        instance = serializer.save()
+        self._recalculate_service_orders(instance.service)
+
+    def perform_destroy(self, instance):
+        service = instance.service
+        instance.delete()
+        self._recalculate_service_orders(service)
+
+
+class AdminRevenueSummaryAPIView(APIView):
+    """
+    GET /api/admin/revenue-summary/
+
+    Provide detailed revenue breakdown for the admin dashboard
+    """
+
+    permission_classes = [IsAuthenticated, IsAdminUser]
+
+    def get(self, request):
+        from django.db.models import Sum, Count
+
+        orders = Order.objects.select_related('service', 'collaborator', 'status')
+        total_orders = orders.count()
+        completed_orders = orders.filter(status__name__icontains='completed').count()
+
+        totals = orders.aggregate(
+            gross_revenue=Sum('total_price'),
+            collaborator_payouts=Sum('collaborator_commission_amount'),
+            sademy_commission=Sum('sademy_commission_amount'),
+        )
+
+        two_places = Decimal('0.01')
+        gross_revenue = totals['gross_revenue'] or Decimal('0.00')
+        collaborator_payouts = totals['collaborator_payouts'] or Decimal('0.00')
+        sademy_commission = totals['sademy_commission'] or Decimal('0.00')
+
+        summary = {
+            'total_orders': total_orders,
+            'completed_orders': completed_orders,
+            'gross_revenue': str(gross_revenue.quantize(two_places)),
+            'collaborator_payouts': str(collaborator_payouts.quantize(two_places)),
+            'sademy_commission': str(sademy_commission.quantize(two_places)),
+            'platform_net_revenue': str((gross_revenue - collaborator_payouts).quantize(two_places)),
+            'average_order_value': str(
+                (gross_revenue / total_orders).quantize(two_places)
+                if total_orders > 0 else Decimal('0.00').quantize(two_places)
+            ),
+            'average_collaborator_payout': str(
+                (collaborator_payouts / completed_orders).quantize(two_places)
+                if completed_orders > 0 else Decimal('0.00').quantize(two_places)
+            ),
+        }
+
+        # Revenue by service
+        service_breakdown = []
+        services = Service.objects.annotate(
+            order_count=Count('orders'),
+            gross_revenue=Sum('orders__total_price'),
+            collaborator_payouts=Sum('orders__collaborator_commission_amount'),
+            sademy_commission=Sum('orders__sademy_commission_amount'),
+        ).filter(order_count__gt=0).order_by('-gross_revenue')
+
+        for service in services:
+            gross = service.gross_revenue or Decimal('0.00')
+            payouts = service.collaborator_payouts or Decimal('0.00')
+            commission = service.sademy_commission or Decimal('0.00')
+            service_breakdown.append({
+                'service_id': service.id,
+                'service_name': service.name,
+                'orders_count': service.order_count,
+                'gross_revenue': str(gross.quantize(two_places)),
+                'collaborator_payouts': str(payouts.quantize(two_places)),
+                'sademy_commission': str(commission.quantize(two_places)),
+                'platform_net_revenue': str((gross - payouts).quantize(two_places)),
+            })
+
+        # Revenue by collaborator
+        collaborator_breakdown = []
+        collaborators = Collaborator.objects.select_related('user').annotate(
+            order_count=Count('orders'),
+            gross_revenue=Sum('orders__total_price'),
+            collaborator_payouts=Sum('orders__collaborator_commission_amount'),
+            sademy_commission=Sum('orders__sademy_commission_amount'),
+        ).filter(order_count__gt=0).order_by('-collaborator_payouts')
+
+        for collaborator in collaborators:
+            payouts = collaborator.collaborator_payouts or Decimal('0.00')
+            gross = collaborator.gross_revenue or Decimal('0.00')
+            commission = collaborator.sademy_commission or Decimal('0.00')
+            collaborator_breakdown.append({
+                'collaborator_id': collaborator.user_id,
+                'collaborator_name': collaborator.user.get_full_name() or collaborator.user.username,
+                'orders_count': collaborator.order_count,
+                'gross_revenue': str(gross.quantize(two_places)),
+                'collaborator_payouts': str(payouts.quantize(two_places)),
+                'sademy_commission': str(commission.quantize(two_places)),
+                'average_payout': str(
+                    (payouts / collaborator.order_count).quantize(two_places)
+                    if collaborator.order_count > 0 else Decimal('0.00').quantize(two_places)
+                ),
+            })
+
+        return Response({
+            'summary': summary,
+            'by_service': service_breakdown,
+            'by_collaborator': collaborator_breakdown,
+        })
+
+
+class CollaboratorRevenueSummaryAPIView(APIView):
+    """
+    GET /api/collaborator/revenue/
+
+    Provide revenue and payout details for the authenticated collaborator
+    """
+
+    permission_classes = [IsCollaboratorUser]
+
+    def get(self, request):
+        from django.db.models import Sum, Count
+
+        if not hasattr(request.user, 'collaborator_profile'):
+            return Response({'error': 'Collaborator profile not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        collaborator = request.user.collaborator_profile
+        orders = Order.objects.filter(collaborator=collaborator).select_related('service', 'status')
+
+        completed_orders = orders.filter(status__name__icontains='completed')
+        completed_orders_count = completed_orders.count()
+        in_progress_orders_count = orders.filter(status__name__icontains='progress').count()
+        pending_orders_count = orders.filter(status__name__icontains='pending').count()
+        total_orders = orders.count()
+
+        totals = orders.aggregate(
+            projected_payout=Sum('collaborator_commission_amount'),
+        )
+        completed_totals = completed_orders.aggregate(
+            completed_payout=Sum('collaborator_commission_amount'),
+        )
+
+        projected_payout = totals['projected_payout'] or Decimal('0.00')
+        completed_payout = completed_totals['completed_payout'] or Decimal('0.00')
+
+        two_places = Decimal('0.01')
+
+        summary = {
+            'total_orders': total_orders,
+            'completed_orders': completed_orders_count,
+            'in_progress_orders': in_progress_orders_count,
+            'pending_orders': pending_orders_count,
+            'completed_payout': str(completed_payout.quantize(two_places)),
+            'projected_payout': str(projected_payout.quantize(two_places)),
+            'average_completed_payout': str(
+                (completed_payout / completed_orders_count).quantize(two_places)
+                if completed_orders_count > 0 else Decimal('0.00').quantize(two_places)
+            ),
+        }
+
+        by_service = []
+        services = Service.objects.filter(orders__collaborator=collaborator).annotate(
+            order_count=Count('orders'),
+            completed_orders=Count('orders', filter=models.Q(orders__status__name__icontains='completed')),
+            payout=Sum('orders__collaborator_commission_amount'),
+        ).order_by('-payout')
+
+        for service in services:
+            payout = service.payout or Decimal('0.00')
+            by_service.append({
+                'service_id': service.id,
+                'service_name': service.name,
+                'orders_count': service.order_count,
+                'completed_orders': service.completed_orders,
+                'payout': str(payout.quantize(two_places)),
+            })
+
+        recent_orders = []
+        for order in orders.order_by('-date')[:20]:
+            recent_orders.append({
+                'order_id': order.id,
+                'service_name': order.service.name,
+                'status': order.status.name,
+                'total_price': str(order.total_price.quantize(two_places)),
+                'collaborator_payout': str(order.collaborator_commission_amount.quantize(two_places)),
+                'order_date': order.date.isoformat(),
+                'deadline_date': order.deadline_date.isoformat() if order.deadline_date else None,
+            })
+
+        return Response({
+            'summary': summary,
+            'by_service': by_service,
+            'recent_orders': recent_orders,
+        })
 
 
 # ==================== NOTIFICATION ENDPOINTS ====================

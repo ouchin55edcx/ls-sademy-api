@@ -5,7 +5,23 @@ Place this file in: core/serializers.py
 
 from rest_framework import serializers
 from django.contrib.auth import get_user_model, authenticate
-from core.models import Service, Review, Livrable, Order, Client, Template, Collaborator, Admin, Status, OrderStatusHistory, GlobalSettings, Notification, Language, ChatbotSession
+from core.models import (
+    Service,
+    Review,
+    Livrable,
+    Order,
+    Client,
+    Template,
+    Collaborator,
+    Admin,
+    Status,
+    OrderStatusHistory,
+    GlobalSettings,
+    Notification,
+    Language,
+    ChatbotSession,
+    ServiceCollaboratorCommission,
+)
 
 User = get_user_model()
 
@@ -924,6 +940,9 @@ class OrderListSerializer(serializers.ModelSerializer):
             'sademy_commission_amount',
             'commission_type',
             'commission_value',
+            'collaborator_commission_amount',
+            'collaborator_commission_type',
+            'collaborator_commission_value',
             'is_blacklisted',
             'blacklist_reason'
         ]
@@ -961,6 +980,8 @@ class OrderCreateUpdateSerializer(serializers.ModelSerializer):
             'comment',
             'commission_type',
             'commission_value',
+            'collaborator_commission_type',
+            'collaborator_commission_value',
             'is_blacklisted',
             'blacklist_reason'
         ]
@@ -1014,6 +1035,12 @@ class OrderCreateUpdateSerializer(serializers.ModelSerializer):
         if value < 0:
             raise serializers.ValidationError('Commission value cannot be negative.')
         return value
+
+    def validate_collaborator_commission_value(self, value):
+        """Validate collaborator commission value"""
+        if value < 0:
+            raise serializers.ValidationError('Collaborator commission value cannot be negative.')
+        return value
     
     def validate(self, data):
         """Cross-field validation"""
@@ -1023,6 +1050,8 @@ class OrderCreateUpdateSerializer(serializers.ModelSerializer):
         blacklist_reason = data.get('blacklist_reason', '')
         commission_type = data.get('commission_type', 'percentage')
         commission_value = data.get('commission_value', 0)
+        collaborator_commission_type = data.get('collaborator_commission_type', 'percentage')
+        collaborator_commission_value = data.get('collaborator_commission_value', 0)
         
         # Only validate advance_payment vs total_price if both are provided
         if total_price is not None and advance_payment > total_price:
@@ -1040,6 +1069,11 @@ class OrderCreateUpdateSerializer(serializers.ModelSerializer):
         if commission_type == 'percentage' and commission_value > 100:
             raise serializers.ValidationError({
                 'commission_value': 'Percentage commission cannot exceed 100%.'
+            })
+
+        if collaborator_commission_type == 'percentage' and collaborator_commission_value > 100:
+            raise serializers.ValidationError({
+                'collaborator_commission_value': 'Collaborator percentage cannot exceed 100%.'
             })
         
         return data
@@ -1087,6 +1121,9 @@ class OrderDetailSerializer(serializers.ModelSerializer):
             'sademy_commission_amount',
             'commission_type',
             'commission_value',
+            'collaborator_commission_amount',
+            'collaborator_commission_type',
+            'collaborator_commission_value',
             'is_blacklisted',
             'blacklist_reason',
             'livrables',
@@ -1113,6 +1150,9 @@ class GlobalSettingsSerializer(serializers.ModelSerializer):
             'commission_type',
             'commission_value',
             'is_commission_enabled',
+            'collaborator_commission_type',
+            'collaborator_commission_value',
+            'is_collaborator_commission_enabled',
             'created_at',
             'updated_at',
             'updated_by'
@@ -1129,13 +1169,68 @@ class GlobalSettingsSerializer(serializers.ModelSerializer):
         """Cross-field validation"""
         commission_type = data.get('commission_type', 'percentage')
         commission_value = data.get('commission_value', 0)
+        collaborator_commission_type = data.get('collaborator_commission_type', 'percentage')
+        collaborator_commission_value = data.get('collaborator_commission_value', 0)
         
         # Validate commission value based on type
         if commission_type == 'percentage' and commission_value > 100:
             raise serializers.ValidationError({
                 'commission_value': 'Percentage commission cannot exceed 100%.'
             })
+
+        if collaborator_commission_type == 'percentage' and collaborator_commission_value > 100:
+            raise serializers.ValidationError({
+                'collaborator_commission_value': 'Collaborator percentage cannot exceed 100%.'
+            })
         
+        return data
+
+
+class ServiceCollaboratorCommissionSerializer(serializers.ModelSerializer):
+    """
+    Serializer for service-level collaborator commission overrides
+    """
+    service_name = serializers.CharField(source='service.name', read_only=True)
+
+    class Meta:
+        model = ServiceCollaboratorCommission
+        fields = [
+            'id',
+            'service',
+            'service_name',
+            'commission_type',
+            'commission_value',
+            'is_active',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'service_name', 'created_at', 'updated_at']
+
+    def validate_commission_value(self, value):
+        if value < 0:
+            raise serializers.ValidationError('Commission value cannot be negative.')
+        return value
+
+    def validate_service(self, value):
+        """
+        Ensure each service has at most one collaborator commission configuration
+        """
+        existing = ServiceCollaboratorCommission.objects.filter(service=value)
+        if self.instance:
+            existing = existing.exclude(pk=self.instance.pk)
+        if existing.exists():
+            raise serializers.ValidationError('A collaborator commission configuration already exists for this service.')
+        return value
+
+    def validate(self, data):
+        commission_type = data.get('commission_type', 'percentage')
+        commission_value = data.get('commission_value', 0)
+
+        if commission_type == 'percentage' and commission_value > 100:
+            raise serializers.ValidationError({
+                'commission_value': 'Percentage commission cannot exceed 100%.'
+            })
+
         return data
 
 

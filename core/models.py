@@ -194,6 +194,25 @@ class GlobalSettings(models.Model):
         default=True,
         help_text="Enable/disable automatic commission calculation"
     )
+
+    # Collaborator Payout Settings
+    collaborator_commission_type = models.CharField(
+        max_length=20,
+        choices=COMMISSION_TYPE_CHOICES,
+        default='percentage',
+        help_text="Type of collaborator payout calculation"
+    )
+    collaborator_commission_value = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal('50.00'),
+        validators=[MinValueValidator(Decimal('0.00'))],
+        help_text="Collaborator payout value (percentage or fixed amount)"
+    )
+    is_collaborator_commission_enabled = models.BooleanField(
+        default=True,
+        help_text="Enable/disable collaborator payout calculation"
+    )
     
     # Metadata
     created_at = models.DateTimeField(auto_now_add=True)
@@ -212,7 +231,10 @@ class GlobalSettings(models.Model):
         verbose_name_plural = 'Global Settings'
 
     def __str__(self):
-        return f"Global Settings - Commission: {self.commission_value} ({self.commission_type})"
+        return (
+            f"Global Settings - Commission: {self.commission_value} ({self.commission_type}), "
+            f"Collaborator: {self.collaborator_commission_value} ({self.collaborator_commission_type})"
+        )
     
     def save(self, *args, **kwargs):
         # Ensure only one instance exists
@@ -228,9 +250,52 @@ class GlobalSettings(models.Model):
                 'commission_type': 'percentage',
                 'commission_value': Decimal('20.00'),
                 'is_commission_enabled': True,
+                'collaborator_commission_type': 'percentage',
+                'collaborator_commission_value': Decimal('50.00'),
+                'is_collaborator_commission_enabled': True,
             }
         )
         return settings
+
+
+class ServiceCollaboratorCommission(models.Model):
+    """
+    Service-level override for collaborator payout settings
+    """
+    service = models.OneToOneField(
+        Service,
+        on_delete=models.CASCADE,
+        related_name='collaborator_commission'
+    )
+    commission_type = models.CharField(
+        max_length=20,
+        choices=GlobalSettings.COMMISSION_TYPE_CHOICES,
+        default='percentage',
+        help_text="Type of collaborator payout calculation for this service"
+    )
+    commission_value = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal('0.00'))],
+        help_text="Collaborator payout value (percentage or fixed amount) for this service"
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Toggle to enable/disable this service-specific collaborator payout configuration"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'service_collaborator_commissions'
+        verbose_name = 'Service Collaborator Commission'
+        verbose_name_plural = 'Service Collaborator Commissions'
+
+    def __str__(self):
+        return (
+            f"{self.service.name} - Collaborator: {self.commission_value} "
+            f"({self.commission_type})"
+        )
 
 
 class Order(models.Model):
@@ -322,6 +387,26 @@ class Order(models.Model):
         validators=[MinValueValidator(Decimal('0.00'))],
         help_text="Commission value applied to this order"
     )
+    collaborator_commission_type = models.CharField(
+        max_length=20,
+        choices=GlobalSettings.COMMISSION_TYPE_CHOICES,
+        default='percentage',
+        help_text="Type of collaborator payout applied to this order"
+    )
+    collaborator_commission_value = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        validators=[MinValueValidator(Decimal('0.00'))],
+        help_text="Collaborator payout value applied to this order"
+    )
+    collaborator_commission_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        validators=[MinValueValidator(Decimal('0.00'))],
+        help_text="Calculated collaborator payout amount for this order"
+    )
     
     # Blacklist fields
     is_blacklisted = models.BooleanField(
@@ -406,13 +491,74 @@ class Order(models.Model):
         try:
             global_settings = GlobalSettings.get_settings()
             if global_settings.is_commission_enabled:
-                self.commission_type = global_settings.commission_type
-                self.commission_value = global_settings.commission_value
-                self.sademy_commission_amount = self.calculate_commission()
+                if self.commission_value == Decimal('0.00'):
+                    self.commission_type = global_settings.commission_type
+                    self.commission_value = global_settings.commission_value
+
+                self.sademy_commission_amount = self.calculate_commission(
+                    self.commission_type,
+                    self.commission_value,
+                )
+            else:
+                self.sademy_commission_amount = Decimal('0.00')
         except Exception as e:
             # Log error but don't fail the order creation
             import logging
             logging.error(f"Failed to apply global commission settings: {str(e)}")
+
+    def calculate_collaborator_payout(self, commission_type=None, commission_value=None):
+        """
+        Calculate collaborator payout for this order
+        """
+        if commission_type is None:
+            commission_type = self.collaborator_commission_type
+        if commission_value is None:
+            commission_value = self.collaborator_commission_value
+
+        if commission_type == 'percentage':
+            payout_amount = (self.total_price * commission_value) / 100
+        else:
+            payout_amount = commission_value
+
+        return payout_amount
+
+    def apply_collaborator_commission_settings(self):
+        """
+        Apply collaborator payout settings to this order.
+        Service-level overrides take precedence over global defaults.
+        """
+        try:
+            global_settings = GlobalSettings.get_settings()
+            service_override = None
+
+            if self.service_id:
+                try:
+                    service_override = self.service.collaborator_commission
+                except ServiceCollaboratorCommission.DoesNotExist:
+                    service_override = None
+
+            if service_override and service_override.is_active:
+                if self.collaborator_commission_value == Decimal('0.00'):
+                    self.collaborator_commission_type = service_override.commission_type
+                    self.collaborator_commission_value = service_override.commission_value
+            elif global_settings.is_collaborator_commission_enabled:
+                if self.collaborator_commission_value == Decimal('0.00'):
+                    self.collaborator_commission_type = global_settings.collaborator_commission_type
+                    self.collaborator_commission_value = global_settings.collaborator_commission_value
+            else:
+                # Collaborator payout disabled globally; only compute if explicit values provided
+                if self.collaborator_commission_value == Decimal('0.00'):
+                    self.collaborator_commission_amount = Decimal('0.00')
+                    return
+
+            self.collaborator_commission_amount = self.calculate_collaborator_payout(
+                self.collaborator_commission_type,
+                self.collaborator_commission_value,
+            )
+        except Exception as e:
+            import logging
+
+            logging.error(f"Failed to apply collaborator commission settings: {str(e)}")
     
     def clean(self):
         """
@@ -430,6 +576,11 @@ class Order(models.Model):
         if self.commission_type == 'percentage' and self.commission_value > 100:
             raise ValidationError({
                 'commission_value': 'Percentage commission cannot exceed 100%.'
+            })
+
+        if self.collaborator_commission_type == 'percentage' and self.collaborator_commission_value > 100:
+            raise ValidationError({
+                'collaborator_commission_value': 'Collaborator percentage commission cannot exceed 100%.'
             })
 
 

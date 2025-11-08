@@ -78,6 +78,8 @@ CORS_ALLOW_ALL_ORIGINS = False
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",  # Next.js default dev server
     "http://127.0.0.1:3000",  # Alternative localhost
+    "http://localhost:3003",  # Frontend dev server
+    "http://127.0.0.1:3003",  # Alternative localhost for frontend
     "http://localhost:8000",  # Django dev server
     "http://127.0.0.1:8000",  # Alternative localhost for Django
     # "https://your-production-domain.com",
@@ -87,6 +89,8 @@ CORS_ALLOWED_ORIGINS = [
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "http://localhost:3003",
+    "http://127.0.0.1:3003",
     "http://localhost:8000",
     "http://127.0.0.1:8000",
 ]

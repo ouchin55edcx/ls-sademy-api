@@ -50,6 +50,10 @@ from core.views import (
     AdminStatisticsAPIView,
     TestEmailAPIView,
     GlobalSettingsRetrieveUpdateAPIView,
+    ServiceCollaboratorCommissionListCreateAPIView,
+    ServiceCollaboratorCommissionRetrieveUpdateDestroyAPIView,
+    AdminRevenueSummaryAPIView,
+    CollaboratorRevenueSummaryAPIView,
     NotificationListAPIView,
     NotificationRetrieveAPIView,
     NotificationMarkReadAPIView,
@@ -123,6 +127,9 @@ urlpatterns = [
     
     # Admin - Global Settings (Admin Only)
     path('admin/global-settings/', GlobalSettingsRetrieveUpdateAPIView.as_view(), name='admin-global-settings'),
+    path('admin/collaborator-commissions/', ServiceCollaboratorCommissionListCreateAPIView.as_view(), name='admin-collaborator-commissions'),
+    path('admin/collaborator-commissions/<int:pk>/', ServiceCollaboratorCommissionRetrieveUpdateDestroyAPIView.as_view(), name='admin-collaborator-commission-detail'),
+    path('admin/revenue-summary/', AdminRevenueSummaryAPIView.as_view(), name='admin-revenue-summary'),
     
     # Collaborator - Order Management (Collaborator Only)
     path('collaborator/orders/', CollaboratorOrderListAPIView.as_view(), name='collaborator-orders-list'),
@@ -131,6 +138,7 @@ urlpatterns = [
     path('collaborator/statuses/', StatusListAPIView.as_view(), name='collaborator-statuses-list'),
     path('collaborator/status/', CollaboratorStatusAPIView.as_view(), name='collaborator-status'),
     path('collaborator/statistics/', CollaboratorStatisticsAPIView.as_view(), name='collaborator-statistics'),
+    path('collaborator/revenue/', CollaboratorRevenueSummaryAPIView.as_view(), name='collaborator-revenue'),
     
     # Collaborator - Template Management (Collaborator Only)
     path('collaborator/templates/', CollaboratorTemplateListAPIView.as_view(), name='collaborator-templates-list'),
