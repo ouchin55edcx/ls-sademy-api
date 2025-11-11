@@ -102,6 +102,8 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:3000",  # Alternative localhost
     "http://localhost:8000",  # Django dev server
     "http://127.0.0.1:8000",  # Alternative localhost for Django
+    "https://sademy.ma",      # Production frontend
+    "https://www.sademy.ma",  # Production frontend (www)
     # Add your frontend URLs here
 ]
 
