@@ -82,7 +82,8 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:3000",  # Alternative localhost
     "http://localhost:8000",  # Django dev server
     "http://127.0.0.1:8000",  # Alternative localhost for Django
-    # "https://your-production-domain.com",
+    "https://sademy.ma",      # Production frontend
+    "https://www.sademy.ma",  # Production frontend (www)
 ]
 
 # Trusted origins for CSRF protection
@@ -91,6 +92,8 @@ CSRF_TRUSTED_ORIGINS = [
     "http://127.0.0.1:3000",
     "http://localhost:8000",
     "http://127.0.0.1:8000",
+    "https://sademy.ma",
+    "https://www.sademy.ma",
 ]
 
 # Allow credentials to be included in CORS requests

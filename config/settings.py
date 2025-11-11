@@ -38,6 +38,8 @@ if railway_domain and railway_domain not in ALLOWED_HOSTS:
 # CSRF Trusted Origins - Required for Railway deployment
 CSRF_TRUSTED_ORIGINS = [
     'https://ls-sademy-api-production.up.railway.app',
+    'https://sademy.ma',
+    'https://www.sademy.ma',
 ]
 
 # Add Railway domain to CSRF trusted origins if set
