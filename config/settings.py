@@ -142,15 +142,21 @@ if mysql_url:
     }
 else:
     # Fallback to individual environment variables
-    # Works with Railway's individual MySQL variables or local .env
+    # Check Railway variables first, then local .env variables
+    db_name = config('MYSQLDATABASE', default='') or config('DB_NAME', default='sademiy_db')
+    db_user = config('MYSQLUSER', default='') or config('DB_USER', default='root')
+    db_password = config('MYSQLPASSWORD', default='') or config('DB_PASSWORD', default='')
+    db_host = config('MYSQLHOST', default='') or config('DB_HOST', default='127.0.0.1')
+    db_port = config('MYSQLPORT', default='') or config('DB_PORT', default='3306')
+    
     DATABASES = {
         'default': {
             'ENGINE': config('DB_ENGINE', default='django.db.backends.mysql'),
-            'NAME': config('DB_NAME', default=config('MYSQLDATABASE', default='sademiy_db')),
-            'USER': config('DB_USER', default=config('MYSQLUSER', default='root')),
-            'PASSWORD': config('DB_PASSWORD', default=config('MYSQLPASSWORD', default='')),
-            'HOST': config('DB_HOST', default=config('MYSQLHOST', default='127.0.0.1')),
-            'PORT': config('DB_PORT', default=config('MYSQLPORT', default='3306'), cast=int),
+            'NAME': db_name,
+            'USER': db_user,
+            'PASSWORD': db_password,
+            'HOST': db_host,
+            'PORT': int(db_port) if db_port else 3306,
             'OPTIONS': {
                 'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
                 'charset': 'utf8mb4',
