@@ -5,6 +5,7 @@ Place this file in: core/serializers.py
 
 from rest_framework import serializers
 from django.contrib.auth import get_user_model, authenticate
+from django.utils.text import slugify
 from core.models import Service, Review, Livrable, Order, Client, Template, Collaborator, Admin, Status, OrderStatusHistory, GlobalSettings, Notification, Language, ChatbotSession
 
 User = get_user_model()
@@ -1335,23 +1336,53 @@ class OrderCreateSerializer(serializers.Serializer):
         help_text="Whether to receive updates about the order"
     )
     
-    # Service mapping
-    SERVICE_MAPPING = {
-        'logo-design': 1,
-        'brand-identity': 2,
-        'full-website': 3,
-        'pitch-deck': 4,
-        'social-media-assets': 5,
-        'other': 6
-    }
-    
     def validate_service(self, value):
-        """Validate service string and map to service_id"""
-        if value not in self.SERVICE_MAPPING:
-            raise serializers.ValidationError(
-                f"Invalid service. Must be one of: {', '.join(self.SERVICE_MAPPING.keys())}"
-            )
-        return value
+        """Validate provided service identifier and return the Service instance"""
+        value_str = str(value).strip() if value is not None else ''
+        if not value_str:
+            raise serializers.ValidationError("Service is required.")
+        
+        service_qs = Service.objects.filter(is_active=True)
+        if not service_qs.exists():
+            raise serializers.ValidationError("No services are currently available.")
+        
+        service = None
+        
+        # Try by numeric id
+        if value_str.isdigit():
+            try:
+                service = service_qs.get(id=int(value_str))
+            except Service.DoesNotExist:
+                service = None
+        else:
+            normalized = slugify(value_str)
+            
+            # Exact case-insensitive match on name
+            service = service_qs.filter(name__iexact=value_str).first()
+            
+            # Match on human-readable slugified name
+            if not service:
+                service = next(
+                    (svc for svc in service_qs if slugify(svc.name) == normalized),
+                    None
+                )
+            
+            # Match on tool_name when provided
+            if not service and value_str:
+                service = service_qs.filter(tool_name__iexact=value_str).first()
+            if not service and normalized:
+                service = next(
+                    (
+                        svc for svc in service_qs
+                        if svc.tool_name and slugify(svc.tool_name) == normalized
+                    ),
+                    None
+                )
+        
+        if not service:
+            raise serializers.ValidationError("Selected service is not available.")
+        
+        return service
     
     def validate_acceptTerms(self, value):
         """Validate that terms are accepted"""
@@ -1397,7 +1428,7 @@ class OrderCreateSerializer(serializers.Serializer):
     
     def create(self, validated_data):
         """Create order and client if needed"""
-        from core.models import Order, Client, User, Service, Status
+        from core.models import Order, Client, User, Status
         from django.utils import timezone
         
         # Extract client data
@@ -1426,12 +1457,8 @@ class OrderCreateSerializer(serializers.Serializer):
             user.phone = phone
             user.save(update_fields=['phone'])
         
-        # Get service
-        service_id = self.SERVICE_MAPPING[validated_data['service']]
-        try:
-            service = Service.objects.get(id=service_id, is_active=True)
-        except Service.DoesNotExist:
-            raise serializers.ValidationError("Selected service is not available.")
+        # Get validated service instance
+        service = validated_data.pop('service')
         
         # Get pending status
         try:
