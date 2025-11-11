@@ -8,7 +8,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('core', '0008_auto_20251021_0934'),
+        ('core', '0007_update_review_model'),  # Changed from 0008 to 0007
     ]
 
     operations = [

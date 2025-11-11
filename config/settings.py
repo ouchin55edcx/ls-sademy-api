@@ -116,101 +116,44 @@ CORS_EXPOSE_HEADERS = [
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-# Parse MySQL URL if provided, otherwise use individual environment variables
-mysql_url = config('MYSQL_URL', default='')
+mysql_url = config('MYSQL_PUBLIC_URL', default='')
+
 if mysql_url:
     # Parse MySQL URL: mysql://user:password@host:port/database
-    parsed = urlparse(mysql_url)
-    db_host = parsed.hostname if parsed.hostname else config('DB_HOST', default=None)
-    db_port = str(parsed.port) if parsed.port else config('DB_PORT', default='3306')
+    # Remove 'mysql://' prefix if present and parse
+    url = mysql_url.replace('mysql://', 'http://')  # Temporary replacement for urlparse
+    parsed = urlparse(url)
     
-    # If no host specified, try to detect from environment or use safe default
-    if not db_host:
-        # Check if we're in a containerized environment
-        # Common indicators: Kubernetes, Docker, or other container platforms
-        is_containerized = any([
-            os.getenv('KUBERNETES_SERVICE_HOST'),
-            os.getenv('DOCKER_HOST'),
-            os.getenv('CONTAINER_ID'),
-            os.path.exists('/.dockerenv'),
-            os.path.exists('/.dockerinit'),
-            (os.getenv('HOSTNAME') or '').startswith('k8s'),
-            # Check if running in a container by examining common paths
-            os.path.exists('/app') and os.path.exists('/app/.venv'),
-        ])
-        
-        if is_containerized:
-            # In containerized environments, default to common service names
-            db_host = config('DB_HOST', default='mysql')  # Common service name
-        else:
-            # Local development - use 127.0.0.1 to force TCP/IP (not Unix socket)
-            db_host = '127.0.0.1'
-    
-    # Force TCP/IP connection by converting 'localhost' to '127.0.0.1'
-    # This prevents MySQLdb from trying to use Unix socket
-    if db_host == 'localhost':
-        db_host = '127.0.0.1'
-    
-    db_config = {
-        'ENGINE': config('DB_ENGINE', default='django.db.backends.mysql'),
-        'NAME': parsed.path.lstrip('/') if parsed.path else config('DB_NAME', default='sademiy_db'),
-        'USER': parsed.username if parsed.username else config('DB_USER', default='root'),
-        'PASSWORD': parsed.password if parsed.password else config('DB_PASSWORD', default=''),
-        'HOST': db_host,
-        'PORT': db_port,
-        'OPTIONS': {
-            'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
-            'charset': 'utf8mb4',
-        },
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.mysql',
+            'NAME': parsed.path.lstrip('/'),
+            'USER': parsed.username,
+            'PASSWORD': parsed.password,
+            'HOST': parsed.hostname,
+            'PORT': parsed.port or 3306,
+            'OPTIONS': {
+                'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
+                'charset': 'utf8mb4',
+            },
+        }
     }
 else:
-    # Fallback to individual environment variables
-    db_host = config('DB_HOST', default=None)
-    db_port = config('DB_PORT', default='3306')
-    
-    # If no host specified, try to detect from environment or use safe default
-    if not db_host:
-        # Check if we're in a containerized environment
-        is_containerized = any([
-            os.getenv('KUBERNETES_SERVICE_HOST'),
-            os.getenv('DOCKER_HOST'),
-            os.getenv('CONTAINER_ID'),
-            os.path.exists('/.dockerenv'),
-            os.path.exists('/.dockerinit'),
-            (os.getenv('HOSTNAME') or '').startswith('k8s'),
-            # Check if running in a container by examining common paths
-            os.path.exists('/app') and os.path.exists('/app/.venv'),
-        ])
-        
-        if is_containerized:
-            # In containerized environments, default to common service names
-            db_host = 'mysql'  # Common service name in Docker/Kubernetes
-        else:
-            # Local development - use 127.0.0.1 to force TCP/IP (not Unix socket)
-            db_host = '127.0.0.1'
-    
-    # Force TCP/IP connection by converting 'localhost' to '127.0.0.1'
-    # This prevents MySQLdb from trying to use Unix socket
-    if db_host == 'localhost':
-        db_host = '127.0.0.1'
-    
-    db_config = {
-        'ENGINE': config('DB_ENGINE', default='django.db.backends.mysql'),
-        'NAME': config('DB_NAME', default='sademiy_db'),
-        'USER': config('DB_USER', default='root'),
-        'PASSWORD': config('DB_PASSWORD', default=''),
-        'HOST': db_host,
-        'PORT': db_port,
-        'OPTIONS': {
-            'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
-            'charset': 'utf8mb4',
-        },
+    # Fallback to individual environment variables (for local development)
+    DATABASES = {
+        'default': {
+            'ENGINE': config('DB_ENGINE', default='django.db.backends.mysql'),
+            'NAME': config('DB_NAME', default='sademiy_db'),
+            'USER': config('DB_USER', default='root'),
+            'PASSWORD': config('DB_PASSWORD', default=''),
+            'HOST': config('DB_HOST', default='127.0.0.1'),
+            'PORT': config('DB_PORT', default=3306, cast=int),
+            'OPTIONS': {
+                'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
+                'charset': 'utf8mb4',
+            },
+        }
     }
-
-DATABASES = {
-    'default': db_config
-}
-
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
