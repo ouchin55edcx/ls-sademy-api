@@ -14,6 +14,7 @@ from pathlib import Path
 import os
 from decouple import config, Csv # Build paths inside the project like this: BASE_DIR / 'subdir'.
 from urllib.parse import urlparse
+import dj_database_url
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
@@ -28,6 +29,11 @@ DEBUG = config('DEBUG', default=False, cast=bool)
 
 # Allowed Hosts
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1', cast=Csv())
+
+# Add Railway.app domain if RAILWAY_PUBLIC_DOMAIN is set
+railway_domain = config('RAILWAY_PUBLIC_DOMAIN', default='')
+if railway_domain and railway_domain not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append(railway_domain)
 
 
 # Application definition
@@ -49,6 +55,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',  # Must be first!
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',  # Serve static files
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -121,33 +128,22 @@ CORS_EXPOSE_HEADERS = [
 mysql_url = config('DATABASE_URL', default='') or config('MYSQL_URL', default='') or config('MYSQL_PUBLIC_URL', default='')
 
 if mysql_url:
-    # Parse MySQL URL: mysql://user:password@host:port/database
-    # Handle both mysql:// and mysql+pymysql:// schemes
-    url = mysql_url.replace('mysql://', 'http://').replace('mysql+pymysql://', 'http://')
-    parsed = urlparse(url)
-    
+    # Use dj_database_url to parse the MySQL URL
     DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.mysql',
-            'NAME': parsed.path.lstrip('/'),
-            'USER': parsed.username or 'root',
-            'PASSWORD': parsed.password or '',
-            'HOST': parsed.hostname or 'localhost',
-            'PORT': parsed.port or 3306,
-            'OPTIONS': {
-                'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
-                'charset': 'utf8mb4',
-            },
-        }
+        'default': dj_database_url.parse(
+            mysql_url,
+            conn_max_age=600,
+            conn_health_checks=True,
+        )
     }
 else:
     # Fallback to individual environment variables
     # Check Railway variables first, then local .env variables
-    db_name = config('MYSQLDATABASE', default='') or config('DB_NAME', default='sademiy_db')
-    db_user = config('MYSQLUSER', default='') or config('DB_USER', default='root')
-    db_password = config('MYSQLPASSWORD', default='') or config('DB_PASSWORD', default='')
-    db_host = config('MYSQLHOST', default='') or config('DB_HOST', default='127.0.0.1')
-    db_port = config('MYSQLPORT', default='') or config('DB_PORT', default='3306')
+    db_name = config('MYSQLDATABASE', default='') or config('MYSQL_DATABASE', default='') or config('DB_NAME', default='sademiy_db')
+    db_user = config('MYSQLUSER', default='') or config('MYSQL_USER', default='') or config('DB_USER', default='root')
+    db_password = config('MYSQLPASSWORD', default='') or config('MYSQL_PASSWORD', default='') or config('DB_PASSWORD', default='')
+    db_host = config('MYSQLHOST', default='') or config('MYSQL_HOST', default='') or config('DB_HOST', default='127.0.0.1')
+    db_port = config('MYSQLPORT', default='') or config('MYSQL_PORT', default='') or config('DB_PORT', default='3306')
     
     DATABASES = {
         'default': {
@@ -199,6 +195,7 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 # Media files (User uploads)
 MEDIA_URL = '/media/'
