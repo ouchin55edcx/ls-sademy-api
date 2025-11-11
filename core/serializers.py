@@ -1487,16 +1487,12 @@ class OrderCreateSerializer(serializers.Serializer):
             'quotation': validated_data['quotation'],
             'lecture': validated_data.get('lecture', ''),
             'total_price': validated_data.get('total_price', 0.01),  # Minimum required
-            'order_number': None,
         }
         
-        # Create order
-        order = Order.objects.create(**order_data)
-        
-        # Generate order number if not set
-        if not order.order_number:
-            order.generate_order_number()
-            order.save(update_fields=['order_number'])
+        # Create order instance so we can assign an order number before saving
+        order = Order(**order_data)
+        order.generate_order_number()
+        order.save()
         
         return order
 
