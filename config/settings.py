@@ -35,6 +35,17 @@ railway_domain = config('RAILWAY_PUBLIC_DOMAIN', default='')
 if railway_domain and railway_domain not in ALLOWED_HOSTS:
     ALLOWED_HOSTS.append(railway_domain)
 
+# CSRF Trusted Origins - Required for Railway deployment
+CSRF_TRUSTED_ORIGINS = [
+    'https://ls-sademy-api-production.up.railway.app',
+]
+
+# Add Railway domain to CSRF trusted origins if set
+if railway_domain:
+    railway_url = f'https://{railway_domain}'
+    if railway_url not in CSRF_TRUSTED_ORIGINS:
+        CSRF_TRUSTED_ORIGINS.append(railway_url)
+
 
 # Application definition
 
