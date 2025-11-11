@@ -116,21 +116,23 @@ CORS_EXPOSE_HEADERS = [
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-mysql_url = config('MYSQL_PUBLIC_URL', default='')
+# Try multiple possible environment variable names for MySQL URL
+# Railway provides DATABASE_URL, MYSQL_URL, or MYSQL_PUBLIC_URL
+mysql_url = config('DATABASE_URL', default='') or config('MYSQL_URL', default='') or config('MYSQL_PUBLIC_URL', default='')
 
 if mysql_url:
     # Parse MySQL URL: mysql://user:password@host:port/database
-    # Remove 'mysql://' prefix if present and parse
-    url = mysql_url.replace('mysql://', 'http://')  # Temporary replacement for urlparse
+    # Handle both mysql:// and mysql+pymysql:// schemes
+    url = mysql_url.replace('mysql://', 'http://').replace('mysql+pymysql://', 'http://')
     parsed = urlparse(url)
     
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.mysql',
             'NAME': parsed.path.lstrip('/'),
-            'USER': parsed.username,
-            'PASSWORD': parsed.password,
-            'HOST': parsed.hostname,
+            'USER': parsed.username or 'root',
+            'PASSWORD': parsed.password or '',
+            'HOST': parsed.hostname or 'localhost',
             'PORT': parsed.port or 3306,
             'OPTIONS': {
                 'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
@@ -139,15 +141,16 @@ if mysql_url:
         }
     }
 else:
-    # Fallback to individual environment variables (for local development)
+    # Fallback to individual environment variables
+    # Works with Railway's individual MySQL variables or local .env
     DATABASES = {
         'default': {
             'ENGINE': config('DB_ENGINE', default='django.db.backends.mysql'),
-            'NAME': config('DB_NAME', default='sademiy_db'),
-            'USER': config('DB_USER', default='root'),
-            'PASSWORD': config('DB_PASSWORD', default=''),
-            'HOST': config('DB_HOST', default='127.0.0.1'),
-            'PORT': config('DB_PORT', default=3306, cast=int),
+            'NAME': config('DB_NAME', default=config('MYSQLDATABASE', default='sademiy_db')),
+            'USER': config('DB_USER', default=config('MYSQLUSER', default='root')),
+            'PASSWORD': config('DB_PASSWORD', default=config('MYSQLPASSWORD', default='')),
+            'HOST': config('DB_HOST', default=config('MYSQLHOST', default='127.0.0.1')),
+            'PORT': config('DB_PORT', default=config('MYSQLPORT', default='3306'), cast=int),
             'OPTIONS': {
                 'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
                 'charset': 'utf8mb4',
