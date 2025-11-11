@@ -59,17 +59,29 @@ class Command(BaseCommand):
 
         # Create Admin Users
         self.stdout.write('Creating admin users...')
-        admin_user = User.objects.create_superuser(
-            username='admin',
-            email='admin@sademiy.com',
-            password='admin123',
-            first_name='Super',
-            last_name='Admin'
-        )
-        admin_user.phone = '+212600000001'
-        admin_user.save()
-        Admin.objects.create(user=admin_user)
-        self.stdout.write('  ✓ Created admin: admin (password: admin123)')
+        try:
+            admin_user, created = User.objects.get_or_create(
+                username='admin',
+                defaults={
+                    'email': 'admin@sademiy.com',
+                    'first_name': 'Super',
+                    'last_name': 'Admin',
+                    'phone': '+212600000001',
+                    'is_staff': True,
+                    'is_superuser': True,
+                }
+            )
+            if created:
+                admin_user.set_password('admin123')
+                admin_user.save()
+                Admin.objects.create(user=admin_user)
+                self.stdout.write('  ✓ Created admin: admin (password: admin123)')
+            else:
+                self.stdout.write('  ℹ️  Admin user already exists: admin')
+                # Make sure Admin profile exists
+                Admin.objects.get_or_create(user=admin_user)
+        except Exception as e:
+            self.stdout.write(f'  ⚠️  Could not create admin user: {str(e)}')
 
         # Create Collaborators
         self.stdout.write('Creating collaborators...')
@@ -79,17 +91,23 @@ class Command(BaseCommand):
         ]
         
         for data in collab_data:
-            user = User.objects.create_user(
+            user, created = User.objects.get_or_create(
                 username=data['username'],
-                email=data['email'],
-                password='collab123',
-                first_name=data['first_name'],
-                last_name=data['last_name']
+                defaults={
+                    'email': data['email'],
+                    'first_name': data['first_name'],
+                    'last_name': data['last_name'],
+                    'phone': data['phone'],
+                }
             )
-            user.phone = data['phone']
-            user.save()
-            Collaborator.objects.create(user=user, is_active=True)
-            self.stdout.write(f"  ✓ Created collaborator: {data['username']} (password: collab123)")
+            if created:
+                user.set_password('collab123')
+                user.save()
+                Collaborator.objects.create(user=user, is_active=True)
+                self.stdout.write(f"  ✓ Created collaborator: {data['username']} (password: collab123)")
+            else:
+                self.stdout.write(f"  ℹ️  Collaborator already exists: {data['username']}")
+                Collaborator.objects.get_or_create(user=user, defaults={'is_active': True})
 
         # Create Clients
         self.stdout.write('Creating clients...')
@@ -102,18 +120,25 @@ class Command(BaseCommand):
         
         clients = []
         for data in client_data:
-            user = User.objects.create_user(
+            user, created = User.objects.get_or_create(
                 username=data['username'],
-                email=data['email'],
-                password='client123',
-                first_name=data['first_name'],
-                last_name=data['last_name']
+                defaults={
+                    'email': data['email'],
+                    'first_name': data['first_name'],
+                    'last_name': data['last_name'],
+                    'phone': data['phone'],
+                }
             )
-            user.phone = data['phone']
-            user.save()
-            client = Client.objects.create(user=user, city=data['city'])
-            clients.append(client)
-            self.stdout.write(f"  ✓ Created client: {data['username']} (password: client123)")
+            if created:
+                user.set_password('client123')
+                user.save()
+                client = Client.objects.create(user=user, city=data['city'])
+                clients.append(client)
+                self.stdout.write(f"  ✓ Created client: {data['username']} (password: client123)")
+            else:
+                self.stdout.write(f"  ℹ️  Client already exists: {data['username']}")
+                client, _ = Client.objects.get_or_create(user=user, defaults={'city': data['city']})
+                clients.append(client)
 
         # Create Services
         self.stdout.write('Creating services...')
