@@ -12,3 +12,4 @@ dj-database-url==2.2.0
 gunicorn==21.2.0
 whitenoise==6.6.0
 setuptools>=65.0.0
+requests==2.32.3
