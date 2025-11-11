@@ -1487,6 +1487,7 @@ class OrderCreateSerializer(serializers.Serializer):
             'quotation': validated_data['quotation'],
             'lecture': validated_data.get('lecture', ''),
             'total_price': validated_data.get('total_price', 0.01),  # Minimum required
+            'order_number': None,
         }
         
         # Create order
