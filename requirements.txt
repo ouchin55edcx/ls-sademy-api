@@ -13,3 +13,6 @@ gunicorn==21.2.0
 whitenoise==6.6.0
 setuptools>=65.0.0
 requests==2.32.3
+celery==5.4.0
+redis==5.0.1
+django-redis==5.4.0

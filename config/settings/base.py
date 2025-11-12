@@ -54,6 +54,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'core.middleware.SlowRequestLoggingMiddleware',
 ]
 
 ROOT_URLCONF = 'config.urls'
@@ -225,6 +226,10 @@ DATABASES = {
     'default': db_config
 }
 
+# Keep database connections open for reuse and enable health checks
+DATABASES['default']['CONN_MAX_AGE'] = 600
+DATABASES['default']['CONN_HEALTH_CHECKS'] = True
+
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
@@ -282,6 +287,8 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
     ],
+    'DEFAULT_PAGINATION_CLASS': 'core.pagination.DefaultPageNumberPagination',
+    'PAGE_SIZE': 25,
 }
 
 # Email Configuration for Mailtrap
@@ -300,3 +307,54 @@ INFOBIP_BASE_URL = config('INFOBIP_BASE_URL', default='https://api.infobip.com')
 INFOBIP_SENDER = config('INFOBIP_SENDER', default='+212XXXXXXXXX')  # Format: +212XXXXXXXXX
 INFOBIP_SMS_SENDER = config('INFOBIP_SMS_SENDER', default='447491163443')  # SMS sender number without +
 ADMIN_PHONE = config('ADMIN_WHATSAPP_NUMBER', default='+212636359603')  # Admin phone for notifications
+
+# Cache / Redis configuration
+CACHE_URL = config('CACHE_URL', default='redis://127.0.0.1:6379/1')
+CACHE_TTL = config('CACHE_TTL', default=300, cast=int)
+
+CACHES = {
+    'default': {
+        'BACKEND': 'django_redis.cache.RedisCache',
+        'LOCATION': CACHE_URL,
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+            'CONNECTION_POOL_KWARGS': {'max_connections': 100},
+        },
+        'TIMEOUT': CACHE_TTL,
+    }
+}
+
+# Celery configuration
+CELERY_BROKER_URL = config('CELERY_BROKER_URL', default='redis://127.0.0.1:6379/0')
+CELERY_RESULT_BACKEND = config('CELERY_RESULT_BACKEND', default=CELERY_BROKER_URL)
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_TIME_LIMIT = 60 * 15  # 15 minutes
+CELERY_BEAT_SCHEDULE = {}
+
+# Logging configuration for slow queries and performance monitoring
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'loggers': {
+        'django.db.backends': {
+            'handlers': ['console'],
+            'level': 'INFO',
+        },
+        'performance': {
+            'handlers': ['console'],
+            'level': 'INFO',
+        },
+    },
+}
+
+SLOW_REQUEST_THRESHOLD_MS = config('SLOW_REQUEST_THRESHOLD_MS', default=1000, cast=int)
+SLOW_QUERY_THRESHOLD_MS = config('SLOW_QUERY_THRESHOLD_MS', default=500, cast=int)
+ENABLE_QUERY_PROFILING = config('ENABLE_QUERY_PROFILING', default=False, cast=bool)

@@ -338,6 +338,24 @@ class Order(models.Model):
         verbose_name = 'Order'
         verbose_name_plural = 'Orders'
         ordering = ['-date']
+        indexes = [
+            models.Index(
+                fields=['collaborator', 'status'],
+                name='order_collab_status_idx',
+            ),
+            models.Index(
+                fields=['client', 'status'],
+                name='order_client_status_idx',
+            ),
+            models.Index(
+                fields=['service', 'status'],
+                name='order_service_status_idx',
+            ),
+            models.Index(
+                fields=['status', 'deadline_date'],
+                name='order_status_deadline_idx',
+            ),
+        ]
 
     def __str__(self):
         collaborator_name = self.collaborator.user.username if self.collaborator else "Unassigned"
