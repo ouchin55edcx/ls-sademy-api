@@ -262,16 +262,22 @@ class ServiceListSerializer(serializers.ModelSerializer):
         ]
     
     def get_templates_count(self, obj):
-        return getattr(obj, 'templates_count', 0)
+        return obj.templates.count()
     
     def get_reviews_count(self, obj):
-        return getattr(obj, 'reviews_count', 0)
+        # Count reviews for all orders with this service
+        return Review.objects.filter(
+            order__service=obj,
+            client__isnull=False
+        ).count()
     
     def get_average_rating(self, obj):
-        average = getattr(obj, 'average_rating', None)
-        if average is None:
-            return None
-        return round(float(average), 2)
+        # Calculate average rating for this service
+        reviews = Review.objects.filter(order__service=obj, client__isnull=False)
+        if reviews.exists():
+            total = sum([review.rating for review in reviews])
+            return round(total / reviews.count(), 2)
+        return None
 
 
 class LivrableSerializer(serializers.ModelSerializer):
@@ -490,13 +496,14 @@ class ServiceDetailSerializer(serializers.ModelSerializer):
         ]
     
     def get_reviews_count(self, obj):
-        return getattr(obj, 'reviews_count', 0)
+        return Review.objects.filter(order__service=obj, client__isnull=False).count()
     
     def get_average_rating(self, obj):
-        average = getattr(obj, 'average_rating', None)
-        if average is None:
-            return None
-        return round(float(average), 2)
+        reviews = Review.objects.filter(order__service=obj, client__isnull=False)
+        if reviews.exists():
+            total = sum([review.rating for review in reviews])
+            return round(total / reviews.count(), 2)
+        return None
     
     def get_recent_reviews(self, obj):
         # Get last 5 reviews for this service
@@ -794,19 +801,20 @@ class ServiceAdminListSerializer(serializers.ModelSerializer):
         ]
     
     def get_templates_count(self, obj):
-        return getattr(obj, 'templates_count', 0)
+        return obj.templates.count()
     
     def get_orders_count(self, obj):
-        return getattr(obj, 'orders_count', 0)
+        return obj.orders.count()
     
     def get_reviews_count(self, obj):
-        return getattr(obj, 'reviews_count', 0)
+        return Review.objects.filter(order__service=obj, client__isnull=False).count()
     
     def get_average_rating(self, obj):
-        average = getattr(obj, 'average_rating', None)
-        if average is None:
-            return None
-        return round(float(average), 2)
+        reviews = Review.objects.filter(order__service=obj, client__isnull=False)
+        if reviews.exists():
+            total = sum([review.rating for review in reviews])
+            return round(total / reviews.count(), 2)
+        return None
 
 
 class ServiceToggleActiveSerializer(serializers.ModelSerializer):
@@ -920,8 +928,6 @@ class OrderListSerializer(serializers.ModelSerializer):
     
     def get_has_livrable(self, obj):
         """Check if the order has any livrables"""
-        if hasattr(obj, 'has_livrable_flag'):
-            return obj.has_livrable_flag
         return obj.livrables.exists()
 
 

@@ -10,12 +10,10 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.authtoken.models import Token
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from django.contrib.auth import login, get_user_model
-from django.db import models, transaction
+from django.db import models
 from django.http import HttpResponse, Http404, FileResponse
 from django.shortcuts import get_object_or_404
 from django.conf import settings
-from django.utils.decorators import method_decorator
-from django.views.decorators.cache import cache_page
 import os
 from core.models import Service, Review, Template, Order, Status, Collaborator, Livrable, OrderStatusHistory, GlobalSettings, Language, ChatbotSession, Client
 from core.serializers import (
@@ -37,13 +35,6 @@ from core.serializers import (
 )
 from core.permissions import IsAdminUser, IsCollaboratorUser, IsClientUser, IsAdminOrCollaboratorUser
 from core.email_service import EmailService
-from core.tasks import (
-    send_order_assignment_email_task,
-    create_collaborator_assignment_notification_task,
-    create_admin_order_assignment_notification_task,
-)
-from core.cache_utils import invalidate_cache_prefix
-from core.querysets import order_with_related
 import logging
 
 User = get_user_model()
@@ -130,7 +121,6 @@ class CurrentUserAPIView(APIView):
         return Response(UserSerializer(request.user).data, status=status.HTTP_200_OK)
 
 
-@method_decorator(cache_page(60 * 5, key_prefix="active-services"), name='dispatch')
 class ActiveServicesListAPIView(generics.ListAPIView):
     """
     GET /api/services/
@@ -153,29 +143,9 @@ class ActiveServicesListAPIView(generics.ListAPIView):
     """
     permission_classes = [AllowAny]
     serializer_class = ServiceListSerializer
-    def get_queryset(self):
-        """
-        Return active services annotated with aggregated metrics to avoid N+1 queries.
-        """
-        return (
-            Service.objects.filter(is_active=True)
-            .annotate(
-                templates_count=models.Count('templates', distinct=True),
-                reviews_count=models.Count(
-                    'orders__reviews',
-                    filter=models.Q(orders__reviews__client__isnull=False),
-                    distinct=True,
-                ),
-                average_rating=models.Avg(
-                    'orders__reviews__rating',
-                    filter=models.Q(orders__reviews__client__isnull=False),
-                ),
-            )
-            .order_by('name')
-        )
+    queryset = Service.objects.filter(is_active=True).order_by('name')
 
 
-@method_decorator(cache_page(60 * 5, key_prefix="service-detail"), name='dispatch')
 class ServiceDetailAPIView(generics.RetrieveAPIView):
     """
     GET /api/services/{id}/
@@ -224,21 +194,7 @@ class ServiceDetailAPIView(generics.RetrieveAPIView):
     """
     permission_classes = [AllowAny]
     serializer_class = ServiceDetailSerializer
-    def get_queryset(self):
-        return (
-            Service.objects.prefetch_related('templates')
-            .annotate(
-                reviews_count=models.Count(
-                    'orders__reviews',
-                    filter=models.Q(orders__reviews__client__isnull=False),
-                    distinct=True,
-                ),
-                average_rating=models.Avg(
-                    'orders__reviews__rating',
-                    filter=models.Q(orders__reviews__client__isnull=False),
-                ),
-            )
-        )
+    queryset = Service.objects.all()
 
 
 class DemoVideoAPIView(APIView):
@@ -309,7 +265,6 @@ class DemoVideoAPIView(APIView):
             )
 
 
-@method_decorator(cache_page(60 * 5, key_prefix="reviews-list"), name='dispatch')
 class AllReviewsListAPIView(generics.ListAPIView):
     """
     GET /api/reviews/
@@ -662,19 +617,8 @@ class ServiceAdminListAPIView(generics.ListAPIView):
     serializer_class = ServiceAdminListSerializer
     
     def get_queryset(self):
-        queryset = Service.objects.annotate(
-            templates_count=models.Count('templates', distinct=True),
-            orders_count=models.Count('orders', distinct=True),
-            reviews_count=models.Count(
-                'orders__reviews',
-                filter=models.Q(orders__reviews__client__isnull=False),
-                distinct=True,
-            ),
-            average_rating=models.Avg(
-                'orders__reviews__rating',
-                filter=models.Q(orders__reviews__client__isnull=False),
-            ),
-        ).order_by('name')
+        from django.db import models
+        queryset = Service.objects.all().order_by('name')
         
         # Filter by active status
         is_active = self.request.query_params.get('is_active', None)
@@ -719,12 +663,6 @@ class ServiceCreateAPIView(generics.CreateAPIView):
     """
     permission_classes = [IsAuthenticated, IsAdminUser]
     serializer_class = ServiceCreateUpdateSerializer
-
-    def perform_create(self, serializer):
-        service = serializer.save()
-        invalidate_cache_prefix("active-services")
-        invalidate_cache_prefix("service-detail")
-        return service
 
 
 class ServiceRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):
@@ -771,17 +709,6 @@ class ServiceRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView)
     permission_classes = [IsAuthenticated, IsAdminUser]
     serializer_class = ServiceCreateUpdateSerializer
     queryset = Service.objects.all()
-
-    def perform_update(self, serializer):
-        service = serializer.save()
-        invalidate_cache_prefix("active-services")
-        invalidate_cache_prefix("service-detail")
-        return service
-
-    def perform_destroy(self, instance):
-        super().perform_destroy(instance)
-        invalidate_cache_prefix("active-services")
-        invalidate_cache_prefix("service-detail")
     
     def destroy(self, request, *args, **kwargs):
         from django.db.models.deletion import ProtectedError
@@ -850,8 +777,6 @@ class ServiceToggleActiveAPIView(APIView):
             updated_service = serializer.save()
             is_active = request.data.get('is_active')
             message = 'Service activated successfully' if is_active else 'Service deactivated successfully'
-            invalidate_cache_prefix("active-services")
-            invalidate_cache_prefix("service-detail")
             
             return Response({
                 'message': message,
@@ -1047,11 +972,9 @@ class OrderListCreateAPIView(generics.ListCreateAPIView):
     }
     """
     permission_classes = [IsAuthenticated, IsAdminUser]
-    def get_queryset(self):
-        """
-        Optimized queryset with related data and livrable existence annotation.
-        """
-        return order_with_related().order_by('-date')
+    queryset = Order.objects.select_related(
+        'client__user', 'service', 'status', 'collaborator__user'
+    ).all()
     
     def get_serializer_class(self):
         if self.request.method == 'GET':
@@ -1062,35 +985,43 @@ class OrderListCreateAPIView(generics.ListCreateAPIView):
         """Create order and send email if collaborator is assigned"""
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-
-        with transaction.atomic():
-            order = serializer.save()
-
-            # Apply global commission defaults when not explicitly provided
-            if not order.commission_type or not order.commission_value:
-                order.apply_global_commission_settings()
-                order.save(update_fields=['commission_type', 'commission_value', 'sademy_commission_amount'])
-
-            def schedule_async_side_effects():
-                if (
-                    order.collaborator
-                    and order.collaborator.user
-                    and order.collaborator.user.email
-                ):
-                    send_order_assignment_email_task.delay(order.pk, order.collaborator.pk)
-                create_collaborator_assignment_notification_task.delay(
-                    order.pk,
-                    order.collaborator.pk if order.collaborator else None,
-                    None,
+        order = serializer.save()
+        
+        # Apply global commission settings if not explicitly set
+        if not order.commission_type or not order.commission_value:
+            order.apply_global_commission_settings()
+            order.save()
+        
+        # Send email notification if collaborator is assigned
+        email_sent = False
+        if order.collaborator and order.collaborator.user.email:
+            try:
+                email_sent = EmailService.send_order_assignment_email(order, order.collaborator)
+            except Exception as e:
+                logging.error(f"Failed to send assignment email: {str(e)}")
+        
+        # Create notification for admin about new order
+        from core.notification_service import NotificationService
+        try:
+            # Get all admin users
+            from core.models import Admin
+            admin_users = Admin.objects.select_related('user').all()
+            for admin in admin_users:
+                NotificationService.create_notification(
+                    user=admin.user,
+                    notification_type='order_assigned',
+                    title=f'New Order Created - Order #{order.id}',
+                    message=f'A new order has been created by {order.client.user.get_full_name() or order.client.user.username} for {order.service.name}',
+                    priority='medium',
+                    order=order
                 )
-                create_admin_order_assignment_notification_task.delay(order.pk)
-                invalidate_cache_prefix("service-detail")
-
-            transaction.on_commit(schedule_async_side_effects)
-
-        refreshed_order = self.get_queryset().get(pk=order.pk)
-        response_data = OrderListSerializer(refreshed_order, context=self.get_serializer_context()).data
-
+        except Exception as e:
+            logging.error(f"Failed to create admin notification for new order: {str(e)}")
+        
+        # Return order data with email status
+        response_data = OrderListSerializer(order).data
+        response_data['email_sent'] = email_sent
+        
         return Response(response_data, status=status.HTTP_201_CREATED)
 
 
@@ -1325,99 +1256,55 @@ class OrderCollaboratorAssignAPIView(generics.UpdateAPIView):
     """
     permission_classes = [IsAuthenticated, IsAdminUser]
     serializer_class = OrderCollaboratorAssignSerializer
-
-    def get_queryset(self):
-        """
-        Optimized base queryset with all relations needed by this endpoint.
-        """
-        return Order.objects.select_related(
-            "client__user",
-            "service",
-            "status",
-            "collaborator__user",
-        )
-
+    queryset = Order.objects.select_related('collaborator__user').all()
+    
     def update(self, request, *args, **kwargs):
-        """
-        Assign or unassign a collaborator atomically while deferring slow side
-        effects (emails + notifications) to Celery.
-        """
-        lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
-        lookup_value = kwargs.get(lookup_url_kwarg)
-        if lookup_value is None:
-            raise Http404("Order not found.")
-
-        with transaction.atomic():
-            # Lock the order row to prevent concurrent assignments (avoids race conditions)
-            locked_order = get_object_or_404(
-                self.get_queryset().select_for_update(), **{self.lookup_field: lookup_value}
-            )
-            self.check_object_permissions(request, locked_order)
-
-            old_collaborator_id = locked_order.collaborator_id
-            serializer = self.get_serializer(
-                locked_order, data=request.data, partial=True
-            )
-            serializer.is_valid(raise_exception=True)
-
-            # Skip unnecessary updates when collaborator stays the same
-            incoming_collaborator = serializer.validated_data.get("collaborator")
-            if incoming_collaborator is None and old_collaborator_id is None:
-                updated_order = locked_order
-            elif incoming_collaborator and incoming_collaborator.id == old_collaborator_id:
-                updated_order = locked_order
-            else:
-                updated_order = serializer.save()
-
-            # Re-fetch with related objects to avoid N+1 queries after update
-            refreshed_order = self.get_queryset().get(pk=updated_order.pk)
-            new_collaborator = refreshed_order.collaborator
-            new_collaborator_id = new_collaborator.pk if new_collaborator else None
-            collaborator_changed = new_collaborator_id != old_collaborator_id
-
-            # Schedule background tasks after successful commit
-            def schedule_async_side_effects():
-                if collaborator_changed:
-                    if (
-                        new_collaborator
-                        and new_collaborator.user
-                        and new_collaborator.user.email
-                    ):
-                        send_order_assignment_email_task.delay(
-                            refreshed_order.pk, new_collaborator.pk
-                        )
-                    create_collaborator_assignment_notification_task.delay(
-                        refreshed_order.pk,
-                        new_collaborator_id,
-                        old_collaborator_id,
-                    )
-                if collaborator_changed or old_collaborator_id is not None:
-                    create_admin_order_assignment_notification_task.delay(
-                        refreshed_order.pk
-                    )
-
-            transaction.on_commit(schedule_async_side_effects)
-
+        instance = self.get_object()
+        old_collaborator = instance.collaborator
+        serializer = self.get_serializer(instance, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        
+        # Refresh instance to get updated collaborator
+        instance.refresh_from_db()
+        
         collaborator_name = "Unassigned"
-        if new_collaborator and new_collaborator.user:
-            collaborator_name = (
-                new_collaborator.user.get_full_name()
-                or new_collaborator.user.username
-            )
+        email_sent = False
+        
+        if instance.collaborator:
+            collaborator_name = instance.collaborator.user.get_full_name() or instance.collaborator.user.username
+            
+            # Send email notification if collaborator was assigned and is different from before
+            if instance.collaborator != old_collaborator and instance.collaborator.user.email:
+                try:
+                    email_sent = EmailService.send_order_assignment_email(instance, instance.collaborator)
+                except Exception as e:
+                    logging.error(f"Failed to send assignment email: {str(e)}")
+            
+            # Create notification for collaborator when order is assigned
+            from core.notification_service import NotificationService
+            try:
+                if instance.collaborator != old_collaborator:
+                    NotificationService.create_notification(
+                        user=instance.collaborator.user,
+                        notification_type='order_assigned',
+                        title=f'New Order Assigned - Order #{instance.id}',
+                        message=f'You have been assigned a new order #{instance.id} for {instance.service.name} by {instance.client.user.get_full_name() or instance.client.user.username}',
+                        priority='medium',
+                        order=instance
+                    )
+            except Exception as e:
+                logging.error(f"Failed to create collaborator assignment notification: {str(e)}")
+        
+        return Response({
+            'id': instance.id,
+            'collaborator': instance.collaborator.user.id if instance.collaborator else None,
+            'collaborator_name': collaborator_name,
+            'message': 'Collaborator assigned successfully',
+            'email_sent': email_sent
+        })
 
-        return Response(
-            {
-                "id": refreshed_order.id,
-                "collaborator": new_collaborator.user.id
-                if new_collaborator and new_collaborator.user
-                else None,
-                "collaborator_name": collaborator_name,
-                "message": "Collaborator assigned successfully",
-            }
-        )
 
-
-@method_decorator(cache_page(60 * 10, key_prefix="statuses"), name='dispatch')
 class StatusListAPIView(generics.ListAPIView):
     """
     GET /api/admin/statuses/
@@ -1453,7 +1340,6 @@ class StatusListAPIView(generics.ListAPIView):
             return [IsAdminUser()]
 
 
-@method_decorator(cache_page(60 * 10, key_prefix="collab-statuses"), name='dispatch')
 class CollaboratorStatusAPIView(generics.ListAPIView):
     """
     GET /api/collaborator/status/
@@ -1541,9 +1427,11 @@ class CollaboratorOrderListAPIView(generics.ListAPIView):
     def get_queryset(self):
         """Return orders assigned to the authenticated collaborator"""
         if hasattr(self.request.user, 'collaborator_profile'):
-            return order_with_related().filter(
+            return Order.objects.filter(
                 collaborator__user=self.request.user
-            ).order_by('-date')
+            ).select_related(
+                'client__user', 'service', 'status', 'collaborator__user'
+            ).prefetch_related('livrables').all()
         return Order.objects.none()
     
     def get_permissions(self):
@@ -1598,9 +1486,11 @@ class ClientOrderListAPIView(generics.ListAPIView):
     def get_queryset(self):
         """Return orders for the authenticated client"""
         if hasattr(self.request.user, 'client_profile'):
-            return order_with_related().filter(
+            return Order.objects.filter(
                 client__user=self.request.user
-            ).order_by('-date')
+            ).select_related(
+                'client__user', 'service', 'status', 'collaborator__user'
+            ).prefetch_related('livrables').all()
         return Order.objects.none()
     
     def get_permissions(self):
@@ -1919,65 +1809,60 @@ class ClientStatisticsAPIView(APIView):
         
         client = request.user.client_profile
         
-        orders = Order.objects.filter(client=client).select_related('service')
-        order_stats = orders.aggregate(
-            total_orders=models.Count('id'),
-            completed_orders=models.Count('id', filter=models.Q(status__name__icontains='completed')),
-            in_progress_orders=models.Count('id', filter=models.Q(status__name__icontains='progress')),
-            pending_orders=models.Count('id', filter=models.Q(status__name__icontains='pending')),
-            total_spent=models.Sum('total_price'),
-        )
-
-        total_orders = order_stats['total_orders'] or 0
-        total_spent = order_stats['total_spent'] or 0
-        average_order_value = round(float(total_spent) / total_orders, 2) if total_orders else 0
-
-        livrable_stats = Livrable.objects.filter(order__client=client).aggregate(
-            total=models.Count('id'),
-            accepted=models.Count('id', filter=models.Q(is_accepted=True)),
-        )
-        total_livrables = livrable_stats['total'] or 0
-        accepted_livrables = livrable_stats['accepted'] or 0
+        # Get all orders for this client
+        orders = Order.objects.filter(client=client)
+        total_orders = orders.count()
+        
+        # Order status statistics
+        completed_orders = orders.filter(status__name__icontains='completed').count()
+        in_progress_orders = orders.filter(status__name__icontains='progress').count()
+        pending_orders = orders.filter(status__name__icontains='pending').count()
+        
+        # Financial statistics
+        total_spent = orders.aggregate(total=models.Sum('total_price'))['total'] or 0
+        average_order_value = round(float(total_spent / total_orders), 2) if total_orders > 0 else 0
+        
+        # Livrables statistics
+        livrables = Livrable.objects.filter(order__client=client)
+        total_livrables = livrables.count()
+        accepted_livrables = livrables.filter(is_accepted=True).count()
         pending_livrables = total_livrables - accepted_livrables
-
-        review_stats = Review.objects.filter(client=client).aggregate(
-            total=models.Count('id'),
-            average=models.Avg('rating'),
-        )
-        total_reviews_given = review_stats['total'] or 0
-        average_rating_given = round(float(review_stats['average']), 2) if review_stats['average'] else 0
-
-        services_used = list(
-            orders.values('service__name')
-            .annotate(
-                orders_count=models.Count('id'),
-                total_spent=models.Sum('total_price'),
-            )
-            .order_by('-orders_count')
-        )
-        services_used_payload = [
-            {
-                'service_name': item['service__name'],
-                'orders_count': item['orders_count'],
-                'total_spent': str(item['total_spent'] or 0),
-            }
-            for item in services_used
-        ]
-
-        recent_activity = [
-            {
+        
+        # Reviews statistics
+        reviews = Review.objects.filter(client=client)
+        total_reviews_given = reviews.count()
+        if total_reviews_given > 0:
+            total_rating = sum([review.rating for review in reviews])
+            average_rating_given = round(total_rating / total_reviews_given, 2)
+        else:
+            average_rating_given = 0
+        
+        # Services used statistics
+        services_used = []
+        for service in Service.objects.filter(orders__client=client).distinct():
+            service_orders = orders.filter(service=service)
+            service_spent = service_orders.aggregate(total=models.Sum('total_price'))['total'] or 0
+            services_used.append({
+                'service_name': service.name,
+                'orders_count': service_orders.count(),
+                'total_spent': str(service_spent)
+            })
+        
+        # Recent activity (last 5 orders)
+        recent_orders = orders.order_by('-date')[:5]
+        recent_activity = []
+        for order in recent_orders:
+            recent_activity.append({
                 'type': 'order_created',
                 'description': f"New order for {order.service.name}",
-                'date': order.date.isoformat(),
-            }
-            for order in orders.order_by('-date').select_related('service')[:5]
-        ]
-
+                'date': order.date.isoformat()
+            })
+        
         return Response({
             'total_orders': total_orders,
-            'completed_orders': order_stats['completed_orders'] or 0,
-            'in_progress_orders': order_stats['in_progress_orders'] or 0,
-            'pending_orders': order_stats['pending_orders'] or 0,
+            'completed_orders': completed_orders,
+            'in_progress_orders': in_progress_orders,
+            'pending_orders': pending_orders,
             'total_spent': str(total_spent),
             'average_order_value': str(average_order_value),
             'total_livrables': total_livrables,
@@ -1985,7 +1870,7 @@ class ClientStatisticsAPIView(APIView):
             'pending_livrables': pending_livrables,
             'total_reviews_given': total_reviews_given,
             'average_rating_given': average_rating_given,
-            'services_used': services_used_payload,
+            'services_used': services_used,
             'recent_activity': recent_activity
         })
 
@@ -2034,69 +1919,63 @@ class CollaboratorStatisticsAPIView(APIView):
         
         collaborator = request.user.collaborator_profile
         
-        orders = Order.objects.filter(collaborator=collaborator).select_related('service')
-        order_stats = orders.aggregate(
-            total_orders=models.Count('id'),
-            completed_orders=models.Count('id', filter=models.Q(status__name__icontains='completed')),
-            in_progress_orders=models.Count('id', filter=models.Q(status__name__icontains='progress')),
-            under_review_orders=models.Count('id', filter=models.Q(status__name__icontains='review')),
-            total_earnings=models.Sum('total_price', filter=models.Q(status__name__icontains='completed')),
-        )
-
-        total_orders = order_stats['total_orders'] or 0
-        completed_orders = order_stats['completed_orders'] or 0
-        total_earnings = order_stats['total_earnings'] or 0
-        average_order_value = round(float(total_earnings) / completed_orders, 2) if completed_orders else 0
-
-        livrable_stats = Livrable.objects.filter(order__collaborator=collaborator).aggregate(
-            total=models.Count('id'),
-            accepted=models.Count('id', filter=models.Q(is_accepted=True)),
-        )
-        total_livrables = livrable_stats['total'] or 0
-        accepted_livrables = livrable_stats['accepted'] or 0
+        # Get all orders assigned to this collaborator
+        orders = Order.objects.filter(collaborator=collaborator)
+        total_orders = orders.count()
+        
+        # Order status statistics
+        completed_orders = orders.filter(status__name__icontains='completed').count()
+        in_progress_orders = orders.filter(status__name__icontains='progress').count()
+        under_review_orders = orders.filter(status__name__icontains='review').count()
+        
+        # Financial statistics (earnings from completed orders)
+        completed_orders_queryset = orders.filter(status__name__icontains='completed')
+        total_earnings = completed_orders_queryset.aggregate(total=models.Sum('total_price'))['total'] or 0
+        average_order_value = round(float(total_earnings / completed_orders), 2) if completed_orders > 0 else 0
+        
+        # Livrables statistics
+        livrables = Livrable.objects.filter(order__collaborator=collaborator)
+        total_livrables = livrables.count()
+        accepted_livrables = livrables.filter(is_accepted=True).count()
         pending_livrables = total_livrables - accepted_livrables
-
-        review_stats = Review.objects.filter(order__collaborator=collaborator).aggregate(
-            total=models.Count('id'),
-            average=models.Avg('rating'),
-        )
-        total_reviews_received = review_stats['total'] or 0
-        average_rating_received = round(float(review_stats['average']), 2) if review_stats['average'] else 0
-
-        services_worked_on = list(
-            orders.values('service__name')
-            .annotate(
-                orders_count=models.Count('id'),
-                total_earnings=models.Sum(
-                    'total_price',
-                    filter=models.Q(status__name__icontains='completed'),
-                ),
-            )
-            .order_by('-orders_count')
-        )
-        services_payload = [
-            {
-                'service_name': item['service__name'],
-                'orders_count': item['orders_count'],
-                'total_earnings': str(item['total_earnings'] or 0),
-            }
-            for item in services_worked_on
-        ]
-
-        recent_activity = [
-            {
+        
+        # Reviews statistics (reviews received from clients)
+        reviews = Review.objects.filter(order__collaborator=collaborator)
+        total_reviews_received = reviews.count()
+        if total_reviews_received > 0:
+            total_rating = sum([review.rating for review in reviews])
+            average_rating_received = round(total_rating / total_reviews_received, 2)
+        else:
+            average_rating_received = 0
+        
+        # Services worked on statistics
+        services_worked_on = []
+        for service in Service.objects.filter(orders__collaborator=collaborator).distinct():
+            service_orders = orders.filter(service=service)
+            service_earnings = service_orders.filter(status__name__icontains='completed').aggregate(
+                total=models.Sum('total_price')
+            )['total'] or 0
+            services_worked_on.append({
+                'service_name': service.name,
+                'orders_count': service_orders.count(),
+                'total_earnings': str(service_earnings)
+            })
+        
+        # Recent activity (last 5 orders assigned)
+        recent_orders = orders.order_by('-date')[:5]
+        recent_activity = []
+        for order in recent_orders:
+            recent_activity.append({
                 'type': 'order_assigned',
                 'description': f"New order assigned for {order.service.name}",
-                'date': order.date.isoformat(),
-            }
-            for order in orders.order_by('-date').select_related('service')[:5]
-        ]
-
+                'date': order.date.isoformat()
+            })
+        
         return Response({
             'total_orders': total_orders,
             'completed_orders': completed_orders,
-            'in_progress_orders': order_stats['in_progress_orders'] or 0,
-            'under_review_orders': order_stats['under_review_orders'] or 0,
+            'in_progress_orders': in_progress_orders,
+            'under_review_orders': under_review_orders,
             'total_earnings': str(total_earnings),
             'average_order_value': str(average_order_value),
             'total_livrables': total_livrables,
@@ -2104,7 +1983,7 @@ class CollaboratorStatisticsAPIView(APIView):
             'pending_livrables': pending_livrables,
             'total_reviews_received': total_reviews_received,
             'average_rating_received': average_rating_received,
-            'services_worked_on': services_payload,
+            'services_worked_on': services_worked_on,
             'recent_activity': recent_activity
         })
 
@@ -2490,7 +2369,6 @@ class ClientReviewListCreateAPIView(generics.ListCreateAPIView):
     def perform_create(self, serializer):
         """Set the client from the request"""
         serializer.save(client=self.request.user.client_profile)
-        invalidate_cache_prefix("reviews-list")
 
 
 class ClientReviewRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):
@@ -2528,7 +2406,6 @@ class ClientReviewRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPI
             )
         
         serializer.save()
-        invalidate_cache_prefix("reviews-list")
     
     def perform_destroy(self, instance):
         """Validate that the review can be deleted"""
@@ -2539,7 +2416,6 @@ class ClientReviewRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPI
             )
         
         instance.delete()
-        invalidate_cache_prefix("reviews-list")
 
 
 class LivrableFileDownloadAPIView(APIView):

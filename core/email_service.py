@@ -6,6 +6,7 @@ from django.template.loader import render_to_string
 from django.conf import settings
 from django.utils.html import strip_tags
 import logging
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +15,34 @@ class EmailService:
     """
     Service for sending emails with HTML templates
     """
+
+    @staticmethod
+    def _can_send_email():
+        """
+        Check if email credentials are configured.
+        """
+        required_settings = [
+            getattr(settings, 'EMAIL_HOST', None),
+            getattr(settings, 'EMAIL_HOST_USER', None),
+            getattr(settings, 'EMAIL_HOST_PASSWORD', None),
+        ]
+        return all(required_settings)
+
+    @staticmethod
+    def _dispatch_email_async(message, success_log_message):
+        """
+        Send email in a background thread to avoid blocking API responses.
+        """
+
+        def _send():
+            try:
+                message.send(fail_silently=False)
+                logger.info(success_log_message)
+            except Exception as e:
+                logger.error(f"Failed to send email: {str(e)}")
+
+        threading.Thread(target=_send, daemon=True).start()
+        return True
     
     @staticmethod
     def send_order_assignment_email(order, collaborator):
@@ -25,6 +54,10 @@ class EmailService:
             collaborator: Collaborator instance
         """
         try:
+            if not EmailService._can_send_email():
+                logger.warning("Email credentials missing; skipping order assignment email.")
+                return False
+            
             # Prepare email context
             context = {
                 'order': order,
@@ -62,9 +95,10 @@ class EmailService:
             msg.attach_alternative(html_content, "text/html")
             
             # Send email
-            msg.send()
-            
-            logger.info(f"Order assignment email sent successfully to {collaborator.user.email} for order #{order.id}")
+            EmailService._dispatch_email_async(
+                msg,
+                f"Order assignment email sent successfully to {collaborator.user.email} for order #{order.id}"
+            )
             return True
             
         except Exception as e:
