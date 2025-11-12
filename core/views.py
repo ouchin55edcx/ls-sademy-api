@@ -97,6 +97,30 @@ class LoginAPIView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
+class CurrentUserAPIView(APIView):
+    """
+    GET /api/me/
+
+    Retrieve the authenticated user's information using their token.
+
+    Response:
+    {
+        "id": 1,
+        "username": "client1",
+        "email": "client1@example.com",
+        "first_name": "Youssef",
+        "last_name": "Tazi",
+        "phone": "+212600000004",
+        "role": "client",
+        "role_id": 1
+    }
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response(UserSerializer(request.user).data, status=status.HTTP_200_OK)
+
+
 class ActiveServicesListAPIView(generics.ListAPIView):
     """
     GET /api/services/

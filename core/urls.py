@@ -6,6 +6,7 @@ from rest_framework_simplejwt.views import (
 )
 from core.views import (
     LoginAPIView,
+    CurrentUserAPIView,
     ActiveServicesListAPIView,
     ServiceDetailAPIView,
     DemoVideoAPIView,
@@ -75,6 +76,7 @@ app_name = 'core'
 urlpatterns = [
     # Authentication
     path('login/', LoginAPIView.as_view(), name='login'),
+    path('me/', CurrentUserAPIView.as_view(), name='current-user'),
     
     # JWT Token endpoints
     path('token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
